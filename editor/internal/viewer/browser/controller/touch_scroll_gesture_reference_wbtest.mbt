@@ -47,9 +47,7 @@ fn TouchScrollTestHarness::runtime(
 fn TouchScrollTestHarness::gesture(
   self : TouchScrollTestHarness,
 ) -> TouchScrollGesture {
-  TouchScrollGesture::TouchScrollGesture(self.runtime(), (x, y) => {
-    self.translations.push((x, y))
-  })
+  TouchScrollGesture(self.runtime(), (x, y) => self.translations.push((x, y)))
 }
 
 ///|

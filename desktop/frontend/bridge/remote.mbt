@@ -43,15 +43,13 @@ fn RemoteBridgeSub::install(
     self.device_id,
     on_notification=notification => {
       scheduler.add(
-        (self.dispatch)(
-          Event::Notification(channel=self.channel, notification~),
-        ),
+        (self.dispatch)(Notification(channel=self.channel, notification~)),
       )
     },
     on_down=() => {
       scheduler.add(
         (self.dispatch)(
-          Event::ChannelDown(
+          ChannelDown(
             channel=self.channel,
             websocket_epoch=self.websocket_epoch,
           ),

@@ -143,11 +143,11 @@ struct LanguageHandle {
 /// Creates an isolated language registry.
 pub fn Languages::Languages() -> Languages {
   {
-    hover_provider: LanguageFeatureRegistry::LanguageFeatureRegistry(),
-    definition_provider: LanguageFeatureRegistry::LanguageFeatureRegistry(),
-    references_provider: LanguageFeatureRegistry::LanguageFeatureRegistry(),
-    document_symbol_provider: LanguageFeatureRegistry::LanguageFeatureRegistry(),
-    markdown_comment_provider: LanguageFeatureRegistry::LanguageFeatureRegistry(),
+    hover_provider: LanguageFeatureRegistry(),
+    definition_provider: LanguageFeatureRegistry(),
+    references_provider: LanguageFeatureRegistry(),
+    document_symbol_provider: LanguageFeatureRegistry(),
+    markdown_comment_provider: LanguageFeatureRegistry(),
     language_configurations: Map([]),
   }
 }

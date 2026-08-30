@@ -142,9 +142,9 @@ fn FoldingRegions::FoldingRegions(
   {
     start_indexes,
     end_indexes,
-    collapse_states: BitField::BitField(start_indexes.length()),
-    user_defined_states: BitField::BitField(start_indexes.length()),
-    recovered_states: BitField::BitField(start_indexes.length()),
+    collapse_states: BitField(start_indexes.length()),
+    user_defined_states: BitField(start_indexes.length()),
+    recovered_states: BitField(start_indexes.length()),
     parents_computed: false,
     types,
   }

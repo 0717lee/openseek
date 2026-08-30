@@ -196,9 +196,7 @@ fn CancellationTokenSource::token_impl(
     Some(token) => token
     None => {
       let token : CancellationToken = {
-        state: SourceMutable(
-          MutableCancellationToken::MutableCancellationToken(self.schedule),
-        ),
+        state: SourceMutable(MutableCancellationToken(self.schedule)),
       }
       self.token_value = Some(token)
       token

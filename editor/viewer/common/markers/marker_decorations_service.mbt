@@ -138,7 +138,7 @@ fn MarkerDecorationsService::acquire_model(
     None => {
       let registration : ModelMarkerRegistration = {
         model,
-        marker_decorations: MarkerDecorations::MarkerDecorations(model),
+        marker_decorations: MarkerDecorations(model),
         ref_count: 1,
         active: true,
         content_subscription: None,

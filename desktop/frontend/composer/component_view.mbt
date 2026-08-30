@@ -174,7 +174,7 @@ fn Entry::view(
   } else {
     match input.presentation.primary_action {
       Send(available~) =>
-        ActionButton::{
+        {
           id: "send",
           class_name: "icon-button send-button",
           title: "Send",
@@ -186,7 +186,7 @@ fn Entry::view(
       Running(steer_available~, can_stop~) =>
         if steer_available &&
           (!self.draft.task.is_blank() || !self.draft.mentions.is_empty()) {
-          ActionButton::{
+          {
             id: "send",
             class_name: "icon-button send-button",
             title: "Steer the running task",
@@ -195,7 +195,7 @@ fn Entry::view(
             content: @icons.icon(@icons.icon_arrow_up),
           }
         } else {
-          ActionButton::{
+          {
             id: "stop",
             class_name: "icon-button stop-button",
             title: "Stop",
@@ -227,7 +227,7 @@ fn Entry::view(
     placeholder: input.presentation.placeholder,
     disabled: input.presentation.disabled,
     input: emit.map(value => TextChanged(value)),
-    keyboard: KeyboardActions::{
+    keyboard: {
       menu_open: !goal_mode && self.completion is Some(_),
       navigate: delta => emit(CompletionMove(delta)),
       accept: emit(CompletionAccept),

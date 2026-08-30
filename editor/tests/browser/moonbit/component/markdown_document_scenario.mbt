@@ -50,7 +50,7 @@ fn MarkdownDocumentHoverHarness::begin(
     position,
     offset: model.get_offset_at(position),
     token,
-    gate: AsyncFeatureGate::AsyncFeatureGate(),
+    gate: AsyncFeatureGate(),
     outcome: "",
   }
   self.next_id.val += 1

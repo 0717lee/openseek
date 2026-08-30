@@ -110,7 +110,7 @@ pub fn ViewModel::with_options(
     view_layout,
     decorations,
     coordinates_converter,
-    hidden_areas_model: HiddenAreasModel::HiddenAreasModel(),
+    hidden_areas_model: HiddenAreasModel(),
     previous_hidden_areas: [],
     model_registration: None,
   }

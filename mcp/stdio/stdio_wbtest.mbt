@@ -48,7 +48,7 @@ async test "the MCP stack runs a handshake, list, and call over an ndjson pipe" 
         client_writes.close()
       },
     )
-    let server_transport : &@jsonrpc.Transport = NdjsonTransport::NdjsonTransport(
+    let server_transport : &@jsonrpc.Transport = NdjsonTransport(
       server_reads,
       server_writes,
       on_close=() => {
@@ -99,7 +99,7 @@ async test "recv reads a JSON-RPC line from a real subprocess" {
         return
       }
     }
-    let transport : &@jsonrpc.Transport = NdjsonTransport::NdjsonTransport(
+    let transport : &@jsonrpc.Transport = NdjsonTransport(
       stdout_reader,
       stdin_writer,
       on_close=() => {

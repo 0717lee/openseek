@@ -4,9 +4,7 @@
 pub fn CancellationToken::CancellationToken() -> CancellationToken {
   {
     state: CompatibilityMutable(
-      MutableCancellationToken::MutableCancellationToken(
-        schedule_cancellation_inline,
-      ),
+      MutableCancellationToken(schedule_cancellation_inline),
     ),
   }
 }

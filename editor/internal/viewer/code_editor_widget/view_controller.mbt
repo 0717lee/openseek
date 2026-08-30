@@ -142,9 +142,7 @@ fn CodeEditorWidget::run_select_all_core_command(
     self,
     view_model,
     "editor.action.selectAll",
-    args=BaseCommandArguments(
-      CursorBaseCommandOptions::CursorBaseCommandOptions(source=nominal_source),
-    ),
+    args=BaseCommandArguments(CursorBaseCommandOptions(source=nominal_source)),
   )
 }
 

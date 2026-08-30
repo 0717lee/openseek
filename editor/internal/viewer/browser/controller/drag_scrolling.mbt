@@ -94,7 +94,7 @@ fn DragScrolling::start(
     Some(operation) => operation.set_position(position, mouse_event)
     None =>
       self.operation = Some(
-        DragScrollingOperation::DragScrollingOperation(
+        DragScrollingOperation(
           self.direction,
           self.view_helper,
           self.mouse_target_factory,

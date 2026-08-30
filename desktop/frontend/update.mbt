@@ -764,11 +764,7 @@ fn open_explorer(
   mode : @fileeditor.ExplorerMode,
 ) -> (@cmd.Cmd, Model) {
   let model = model.begin_editor_navigation()
-  let screen = if model.screen is Screen::Codex {
-    Screen::Codex
-  } else {
-    Screen::Chat
-  }
+  let screen = if model.screen is Codex { Screen::Codex } else { Chat }
   let next = {
     ..model,
     screen,

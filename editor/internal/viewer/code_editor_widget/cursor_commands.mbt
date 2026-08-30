@@ -29,7 +29,7 @@ fn CursorMoveCommandArgs::CursorMoveCommandArgs(
 
 ///|
 fn CursorMoveCommandArgs::empty() -> CursorMoveCommandArgs {
-  CursorMoveCommandArgs::CursorMoveCommandArgs()
+  CursorMoveCommandArgs()
 }
 
 ///|
@@ -211,9 +211,7 @@ fn CursorMoveBasedCommand::as_core_editor_command(
   {
     id: self.id,
     precondition: None,
-    default_args: SimpleMoveCommandArguments(
-      CursorMoveCommandOptions::CursorMoveCommandOptions(),
-    ),
+    default_args: SimpleMoveCommandArguments(CursorMoveCommandOptions()),
     run_core_editor_command: (viewer, view_model, args) => {
       self.run(viewer, view_model, args)
     },
@@ -229,7 +227,7 @@ fn CursorMoveBasedCommand::run(
 ) -> Bool {
   let dynamic_args = match core_args {
     SimpleMoveCommandArguments(args) => args
-    _ => CursorMoveCommandOptions::CursorMoveCommandOptions()
+    _ => CursorMoveCommandOptions()
   }
   if self.static_args.value == -1 {
     let page_size = dynamic_args.page_size.unwrap_or(-1)
@@ -269,13 +267,11 @@ fn HomeCommand::as_core_editor_command(self : HomeCommand) -> CoreEditorCommand 
   {
     id: self.id,
     precondition: None,
-    default_args: BaseCommandArguments(
-      CursorBaseCommandOptions::CursorBaseCommandOptions(),
-    ),
+    default_args: BaseCommandArguments(CursorBaseCommandOptions()),
     run_core_editor_command: (viewer, view_model, args) => {
       let options = match args {
         BaseCommandArguments(options) => options
-        _ => CursorBaseCommandOptions::CursorBaseCommandOptions()
+        _ => CursorBaseCommandOptions()
       }
       ignore(view_model)
       viewer.run_cursor_home(self.in_selection_mode, source=options.source)
@@ -319,13 +315,11 @@ fn LineStartCommand::as_core_editor_command(
   {
     id: self.id,
     precondition: None,
-    default_args: BaseCommandArguments(
-      CursorBaseCommandOptions::CursorBaseCommandOptions(),
-    ),
+    default_args: BaseCommandArguments(CursorBaseCommandOptions()),
     run_core_editor_command: (viewer, view_model, args) => {
       let options = match args {
         BaseCommandArguments(options) => options
-        _ => CursorBaseCommandOptions::CursorBaseCommandOptions()
+        _ => CursorBaseCommandOptions()
       }
       let changed = view_model.set_cursor_state(
         Some(
@@ -358,13 +352,11 @@ fn EndCommand::as_core_editor_command(self : EndCommand) -> CoreEditorCommand {
   {
     id: self.id,
     precondition: None,
-    default_args: EndCommandArguments(
-      EndCommandOptions::EndCommandOptions(sticky=false),
-    ),
+    default_args: EndCommandArguments(EndCommandOptions(sticky=false)),
     run_core_editor_command: (viewer, view_model, args) => {
       let options = match args {
         EndCommandArguments(options) => options
-        _ => EndCommandOptions::EndCommandOptions()
+        _ => EndCommandOptions()
       }
       let sticky = options.sticky.unwrap_or(false)
       ignore(view_model)
@@ -413,13 +405,11 @@ fn LineEndCommand::as_core_editor_command(
   {
     id: self.id,
     precondition: None,
-    default_args: BaseCommandArguments(
-      CursorBaseCommandOptions::CursorBaseCommandOptions(),
-    ),
+    default_args: BaseCommandArguments(CursorBaseCommandOptions()),
     run_core_editor_command: (viewer, view_model, args) => {
       let options = match args {
         BaseCommandArguments(options) => options
-        _ => CursorBaseCommandOptions::CursorBaseCommandOptions()
+        _ => CursorBaseCommandOptions()
       }
       let changed = view_model.set_cursor_state(
         Some(
@@ -584,13 +574,11 @@ fn SetSelectionCommand::as_core_editor_command(
   {
     id: self.id,
     precondition: None,
-    default_args: SetSelectionCommandArguments(
-      CursorSetSelectionCommandArgs::CursorSetSelectionCommandArgs(),
-    ),
+    default_args: SetSelectionCommandArguments(CursorSetSelectionCommandArgs()),
     run_core_editor_command: (_, view_model, core_args) => {
       let args = match core_args {
         SetSelectionCommandArguments(args) => args
-        _ => CursorSetSelectionCommandArgs::CursorSetSelectionCommandArgs()
+        _ => CursorSetSelectionCommandArgs()
       }
       guard args.selection is Some(selection) else { return false }
       view_model.set_cursor_state(

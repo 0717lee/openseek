@@ -1849,7 +1849,7 @@ pub fn sync(
     for path in ctx.open_files {
       docs[path] = {
         name: basename(path),
-        state: TabState::TabLoading,
+        state: TabLoading,
         review: None,
         stale: false,
       }

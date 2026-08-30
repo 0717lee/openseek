@@ -97,7 +97,7 @@ pub fn MonospaceLineBreaksComputerFactory::MonospaceLineBreaksComputerFactory(
   break_after_chars : String,
 ) -> MonospaceLineBreaksComputerFactory {
   {
-    classifier: WrappingCharacterClassifier::WrappingCharacterClassifier(
+    classifier: WrappingCharacterClassifier(
       break_before_chars, break_after_chars,
     ),
   }

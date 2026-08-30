@@ -178,7 +178,7 @@ pub fn MarkerService::MarkerService(
   }
   let service : MarkerService = {
     did_change_markers,
-    data: DoubleResourceMap::DoubleResourceMap(),
+    data: DoubleResourceMap(),
     filtered_resources: Map([]),
   }
   service

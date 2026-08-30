@@ -704,11 +704,7 @@ pub fn HoverController::request_stamp(
   model : @model.TextModel,
   cancellation_token : @language.CancellationToken,
 ) -> HoverRequestStamp {
-  HoverRequestStamp::HoverRequestStamp(
-    model,
-    self.operation.token,
-    cancellation_token,
-  )
+  HoverRequestStamp(model, self.operation.token, cancellation_token)
 }
 
 ///|

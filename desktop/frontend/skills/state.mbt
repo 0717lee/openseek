@@ -98,10 +98,7 @@ pub fn State::opening(
       if channel == input.channel {
         (@cmd.none, self.catalog)
       } else {
-        (
-          fetch_catalog(emit, input.channel),
-          Catalog::Loading(channel=input.channel),
-        )
+        (fetch_catalog(emit, input.channel), Loading(channel=input.channel))
       }
     current => (@cmd.none, current)
   }
@@ -209,7 +206,7 @@ pub fn State::handle(
         _ =>
           (
             fetch_catalog(emit, input.channel),
-            { ..self, catalog: Catalog::Loading(channel=input.channel), },
+            { ..self, catalog: Loading(channel=input.channel), },
             None,
           )
       }

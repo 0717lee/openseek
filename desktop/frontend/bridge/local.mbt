@@ -37,7 +37,7 @@ fn LocalBridgeSub::install(self : LocalBridgeSub, attempt : Int) -> @cmd.Cmd {
       if attempt > 120 {
         scheduler.add(
           (self.dispatch)(
-            Event::Unavailable(
+            Unavailable(
               channel=@interop.ChannelId::Local,
               message="Bridge unavailable",
             ),
@@ -71,7 +71,7 @@ fn LocalBridgeSub::open_host_connection(
         guard self.active else { return }
         scheduler.add(
           (self.dispatch)(
-            Event::Unavailable(
+            Unavailable(
               channel=@interop.ChannelId::Local,
               message=@interop.bridge_error_text(error),
             ),
@@ -130,7 +130,7 @@ fn LocalBridgeSub::wire(
       }
       scheduler.add(
         (self.dispatch)(
-          Event::Notification(channel=@interop.ChannelId::Local, notification~),
+          Notification(channel=@interop.ChannelId::Local, notification~),
         ),
       )
     }
@@ -140,7 +140,7 @@ fn LocalBridgeSub::wire(
   // shared protocol notifications. The parent frontend owns their UI decode.
   self.subscribe(extension_events, "openseek.browser.event", event => {
     guard event_payload(event) is Some(payload) else { return }
-    scheduler.add((self.dispatch)(Event::BrowserEvent(payload~)))
+    scheduler.add((self.dispatch)(BrowserEvent(payload~)))
   })
   // Application events use `__MoonBit__.app.on`; keep their command id typed
   // while leaving command policy to the parent frontend.
@@ -149,7 +149,7 @@ fn LocalBridgeSub::wire(
       payload.get("command_id") is Some(String(command_id)) else {
       return
     }
-    scheduler.add((self.dispatch)(Event::MenuCommand(command_id~)))
+    scheduler.add((self.dispatch)(MenuCommand(command_id~)))
   })
   // The notification extension stamps the owning run id in `payload`.
   self.subscribe(extension_events, "notification.click", event => {
@@ -158,7 +158,7 @@ fn LocalBridgeSub::wire(
       !run_id.is_empty() else {
       return
     }
-    scheduler.add((self.dispatch)(Event::NotificationClicked(run_id~)))
+    scheduler.add((self.dispatch)(NotificationClicked(run_id~)))
   })
 }
 

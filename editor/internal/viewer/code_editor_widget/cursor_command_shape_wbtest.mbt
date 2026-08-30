@@ -27,7 +27,7 @@ test "move core command accepts absent and supplied view positions" {
         viewer.run_move_to_core_command(
           view_model,
           Some(
-            CursorMoveCommandArgs::CursorMoveCommandArgs(
+            CursorMoveCommandArgs(
               source="mouse",
               position=Position(1, 6),
               reveal_type=None,
@@ -43,7 +43,7 @@ test "move core command accepts absent and supplied view positions" {
         viewer.run_move_to_core_command(
           view_model,
           Some(
-            CursorMoveCommandArgs::CursorMoveCommandArgs(
+            CursorMoveCommandArgs(
               source="mouse",
               position=Position(1, 6),
               view_position=Position(1, 6),
@@ -116,9 +116,7 @@ test "registered model line start and end commands preserve selection mode" {
         viewer,
         view_model,
         id,
-        args=BaseCommandArguments(
-          CursorBaseCommandOptions::CursorBaseCommandOptions(source~),
-        ),
+        args=BaseCommandArguments(CursorBaseCommandOptions(source~)),
       )
     }
     let install = fn(column, residue) {
