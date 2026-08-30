@@ -1,16 +1,4 @@
 ///|
-fn capitalize(text : String) -> String {
-  // `[first, .. rest]` binds the first Unicode scalar and the true remainder.
-  // The old `iter().next()` + `text[1:]` mixed a scalar with a code-unit slice:
-  // a non-BMP first char left `text[1:]` inside its surrogate pair, corrupting
-  // the tail on native and *panicking* on js (StringView sub mid-surrogate).
-  match text {
-    [first, .. rest] => "\{first.to_ascii_uppercase()}\{rest}"
-    [] => text
-  }
-}
-
-///|
 /// One durable model step's work, or adjacent activity from another source.
 /// Every tool call is always on display as its own one-line row
 /// (`tool_call_view`), expandable to that call's arguments and output — so a
@@ -304,13 +292,11 @@ fn tool_request_view(item : @transcript.TranscriptItem) -> @html.Html {
     is Tool(call_id~, name~, arguments=Some(arguments), is_error~, brief~, ..) else {
     return @html.nothing
   }
-  let label = capitalize(
-    if brief is Some(brief) && !brief.is_blank() {
-      brief
-    } else {
-      name
-    },
-  )
+  let label = if brief is Some(brief) && !brief.is_blank() {
+    brief
+  } else {
+    name
+  }
   let error_class = if is_error { " error" } else { "" }
   // The row's always-visible line: the brief, a literal `failed` marker when
   // the result errored (the row's red must not carry the state alone), and —
@@ -393,8 +379,8 @@ fn tool_result_view(
     return @html.nothing
   }
   let label = match (arguments, brief, has_result) {
-    (None, Some(brief), _) if !brief.is_blank() => capitalize(brief)
-    (None, _, _) => capitalize(name)
+    (None, Some(brief), _) if !brief.is_blank() => brief
+    (None, _, _) => name
     (_, _, false) => "Tool output · \{name}"
     _ if is_error => "Tool error · \{name}"
     _ => "Tool result · \{name}"
@@ -403,7 +389,7 @@ fn tool_result_view(
   let pending_class = if has_result { "" } else { " pending" }
   let line : Array[@html.Html] = [
     @html.span(class="tool-flow", "←"),
-    @html.span(class="tool-result-text", capitalize(label)),
+    @html.span(class="tool-result-text", label),
   ]
   if is_error {
     line.push(@html.span(class="tool-call-failed", "failed"))

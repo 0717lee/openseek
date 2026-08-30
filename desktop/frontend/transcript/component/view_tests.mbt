@@ -29,12 +29,26 @@ fn step_summary(step : Int, label : String) -> String {
 }
 
 ///|
-test "capitalize is Unicode-safe on a non-BMP first char" {
-  inspect(capitalize("hello world"), content="Hello world")
-  // 🎉 = U+1F389, a surrogate pair. The old text[1:] sliced into it — corrupt
-  // on native, a panic on js. It must survive whole with the remainder intact.
-  inspect(capitalize("🎉 done"), content="🎉 done")
-  inspect(capitalize(""), content="")
+#warnings("-alert_unstable")
+test "the mbtx tool name stays lowercase in its row captions" {
+  let rendered = tool_call_view({
+    kind: Tool(
+      call_id="mbtx-1",
+      name="mbtx",
+      arguments=Some("{\"source\":\"println(1)\"}"),
+      has_result=true,
+      is_error=false,
+      brief=Some("mbtx (exit=0)"),
+    ),
+    content: "1",
+    ts: None,
+    sequence: None,
+  })
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(
+    markup.contains("<span class=\"tool-call-text\">mbtx (exit=0)</span>"),
+  )
+  assert_false(markup.contains("Mbtx"))
 }
 
 ///|
@@ -332,7 +346,7 @@ test "live step hands off to its durable assistant card key" {
   assert_true(first_markup.contains("activity-heading"))
   assert_true(first_markup.contains("#1</span>"))
   assert_true(
-    first_markup.contains("<span class=\"tool-call-text\">Read moon.mod</span>"),
+    first_markup.contains("<span class=\"tool-call-text\">read moon.mod</span>"),
   )
   assert_false(first_markup.contains("<details class=\"activity\""))
   let handoff_key = "activity\u{0}after\u{0}s2\u{0}o0"
@@ -468,7 +482,7 @@ test "an ambiguous commit-first prefix keeps live reasoning visible" {
     @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
   })
   assert_true(markup.contains(step_summary(1, "Thought")))
-  assert_true(markup.contains("<span class=\"tool-call-text\">Read</span>"))
+  assert_true(markup.contains("<span class=\"tool-call-text\">read</span>"))
   assert_true(markup.contains("complete thought"))
   assert_false(markup.contains("activity-thinking-live"))
   assert_false(markup.contains("#2"))
@@ -608,9 +622,9 @@ test "every tool request and result of a run is on display as its own row" {
   // One always-visible request and result row per exchange, no fold around the
   // run, and no synthetic category sentence standing in for the briefs.
   assert_true(markup.contains("activity-work"))
-  assert_true(markup.contains("Moon test"))
-  assert_true(markup.contains("Read moon.mod"))
-  assert_true(markup.contains("Edit view.mbt"))
+  assert_true(markup.contains("moon test"))
+  assert_true(markup.contains("read moon.mod"))
+  assert_true(markup.contains("edit view.mbt"))
   assert_false(markup.contains("activity-summary"))
   assert_false(markup.contains("Ran 1 command"))
   assert_eq(markup.split("<details class=\"tool-call").length(), 4)
@@ -623,7 +637,7 @@ test "every tool request and result of a run is on display as its own row" {
   assert_true(markup.contains("<span class=\"tool-call-failed\">failed</span>"))
   // Each summary carries its full label as a tooltip, so a brief the
   // stylesheet ellipsizes on a narrow pane stays reachable.
-  assert_true(markup.contains("title=\"Moon test\""))
+  assert_true(markup.contains("title=\"moon test\""))
 }
 
 ///|
@@ -644,8 +658,8 @@ test "one assistant event renders its call burst before its results" {
   let rendered = activity_view(tools, _ => @cmd.none)
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
   guard (
-      markup.find("First request"),
-      markup.find("Second request"),
+      markup.find("first request"),
+      markup.find("second request"),
       markup.find("Tool result · alpha"),
       markup.find("Tool result · beta"),
     )
@@ -677,9 +691,9 @@ test "different assistant events keep each result beside its request" {
   )
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
   guard (
-      markup.find("First request"),
+      markup.find("first request"),
       markup.find("Tool result · alpha"),
-      markup.find("Second request"),
+      markup.find("second request"),
       markup.find("Tool result · beta"),
     )
     is (
@@ -714,7 +728,7 @@ test "a synthetic runtime update keeps its notice label" {
     sequence: Some(21),
   })
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
-  assert_true(markup.contains("Moon_check passed"))
+  assert_true(markup.contains("moon_check passed"))
   assert_false(markup.contains("Tool result"))
 }
 
@@ -738,7 +752,7 @@ test "a pending tool keeps its streamed output visible" {
     sequence: None,
   })
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
-  assert_true(markup.contains("Moon test"))
+  assert_true(markup.contains("moon test"))
   assert_true(markup.contains("Tool output · shell"))
   assert_true(markup.contains("package core: 12/20 tests passed"))
   assert_true(markup.contains("<details class=\"tool-result pending\">"))
@@ -766,7 +780,7 @@ test "a mixed activity keeps its call on display beside the thought fold" {
   assert_true(markup.contains("checking the diff"))
   assert_true(
     markup.contains(
-      "<span class=\"tool-call-text\">Moon fmt · git diff</span>",
+      "<span class=\"tool-call-text\">moon fmt · git diff</span>",
     ),
   )
   assert_true(markup.contains("<pre class=\"tool-call-output\">output</pre>"))
