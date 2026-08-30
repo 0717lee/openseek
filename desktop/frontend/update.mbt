@@ -4764,11 +4764,25 @@ fn update_msg(
         match reuse {
           Some(id) => {
             let dock = @dock.open_browser(model.dock, id)
+            // The reuse matched this page's optimistic URL mirror, which can
+            // drift from what the native view actually shows — a host op that
+            // failed, or a reload's `close_all` that swept the view. Focusing
+            // alone would present the stale page under the clicked URL, so a
+            // reuse re-navigates: `browser.navigate` rebuilds the view when
+            // it is gone, and dropping the pane placement makes the next sync
+            // measure and show whatever the host has now.
             (
-              @cmd.none,
+              browser_navigate(
+                dispatch,
+                id,
+                url,
+                model.theme.is_dark(model.system_dark),
+              ),
               {
                 ..model,
+                preview: @preview.navigate(model.preview, id, url),
                 dock,
+                browser_pane: { shown: None, rect: None, geo: None, },
                 right_panel_open: true,
                 right_panel_menu_open: false,
               },
@@ -18243,7 +18257,8 @@ test "web links open (and reuse) a dock browser tab; other schemes do not" {
     @preview.page(model.preview, 2).unwrap().url ==
     Some("https://terminal.example/docs"),
   )
-  // The same URL re-activates the existing tab instead of duplicating.
+  // The same URL re-activates the existing tab instead of duplicating, and
+  // the reuse re-navigates so the view cannot keep showing a stale page.
   let (_, model) = update(
     dispatch,
     ExternalLinkClicked("http://127.0.0.1:5173/"),
@@ -18251,6 +18266,12 @@ test "web links open (and reuse) a dock browser tab; other schemes do not" {
   )
   assert_eq(model.dock.tabs.length(), 2)
   assert_eq(model.preview.pages.length(), 2)
+  assert_true(@dock.active_browser(model.dock) == Some(1))
+  assert_true(
+    @preview.page(model.preview, 1).unwrap().url ==
+    Some("http://127.0.0.1:5173/"),
+  )
+  assert_true(@preview.page(model.preview, 1).unwrap().loading)
   assert_eq(model.file_panel.file_link_generation, generation + 3)
   // External sites are web pages too: they get their own tab.
   let (_, model) = update(
@@ -18345,6 +18366,51 @@ test "a remote console routes loopback links to the system browser too" {
   )
   assert_true(model.dock.tabs.is_empty())
   assert_true(model.preview.pages.is_empty())
+}
+
+///|
+test "re-clicking a chat link re-navigates the reused tab to the clicked URL" {
+  // The reuse matched the page's optimistic URL mirror, which can have
+  // drifted from what the native view shows — the clicked link must win over
+  // whatever the tab currently displays, and the stale pane placement must
+  // not survive a possibly rebuilt view (#1021).
+  let dispatch = test_dispatch()
+  let model = desktop_model()
+  let (_, model) = update(
+    dispatch,
+    ExternalLinkClicked("http://127.0.0.1:5173/"),
+    model,
+  )
+  let rect : @preview.Rect = { x: 480, y: 46, width: 640, height: 700, }
+  let (_, model) = update(dispatch, BrowserPaneMeasured(rect~), model)
+  assert_true(model.browser_pane.shown == Some(1))
+  let (_, model) = update(
+    dispatch,
+    ExternalLinkClicked("https://github.com/moonbit"),
+    model,
+  )
+  assert_true(@dock.active_browser(model.dock) == Some(2))
+  // Back to the first link: its tab re-activates AND re-navigates.
+  let (_, model) = update(
+    dispatch,
+    ExternalLinkClicked("http://127.0.0.1:5173/"),
+    model,
+  )
+  assert_eq(model.dock.tabs.length(), 2)
+  assert_true(@dock.active_browser(model.dock) == Some(1))
+  let page = @preview.page(model.preview, 1).unwrap()
+  assert_true(page.url == Some("http://127.0.0.1:5173/"))
+  assert_eq(page.input, "http://127.0.0.1:5173/")
+  assert_true(page.loading)
+  assert_true(page.failure is None)
+  // A rebuilt view arrives hidden at a placeholder size, so the placement
+  // the old view had is dropped for the next sync to re-measure.
+  assert_true(model.browser_pane.shown is None)
+  assert_true(model.browser_pane.rect is None)
+  // …and the re-measure places the view again.
+  let (_, model) = update(dispatch, BrowserPaneMeasured(rect~), model)
+  assert_true(model.browser_pane.shown == Some(1))
+  assert_true(model.browser_pane.rect == Some(rect))
 }
 
 ///|
