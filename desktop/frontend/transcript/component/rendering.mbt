@@ -220,20 +220,12 @@ fn TranscriptRenderer::stream_children(
           }
           index += 1
         }
-        if !activity.is_empty() {
-          items.set(
-            TranscriptRenderKey::activity_after(left_boundary).wire(),
-            activity_view(
-              activity,
-              self.on_open,
-              step_label="#\{step_number}",
-              subrun?=self.subrun_link(),
-            ),
-          )
-        }
-        // Assistant narration and final answers remain visible. The activity
-        // is emitted first as the step's work disclosure; prose then becomes
-        // the stable left boundary for the next provisional/durable step.
+        // Assistant narration and final answers lead the step: prose renders
+        // first, and the step's combined activity follows it. The activity
+        // keeps its key on the pre-step boundary, so the live-to-durable
+        // handoff still reuses the browser-owned disclosure even though the
+        // card now sits after the newly committed prose.
+        let step_boundary = left_boundary
         let mut rendered_prose = false
         for row_index in start..<index {
           let row = visible[row_index]
@@ -249,6 +241,17 @@ fn TranscriptRenderer::stream_children(
           // the live card keys after it, and after the commit the settled card
           // uses that same key.
           left_boundary = Some(visible[index - 1].identity)
+        }
+        if !activity.is_empty() {
+          items.set(
+            TranscriptRenderKey::activity_after(step_boundary).wire(),
+            activity_view(
+              activity,
+              self.on_open,
+              step_label="#\{step_number}",
+              subrun?=self.subrun_link(),
+            ),
+          )
         }
         continue
       }

@@ -67,6 +67,498 @@ test "transcript stream children use stable typed keys in display order" {
 }
 
 ///|
+#warnings("-alert_unstable")
+test "durable assistant sequences render as separate foldable steps" {
+  let user : VisibleRow = {
+    item: { kind: User, content: "question", ts: None, sequence: Some(1), },
+    identity: "s1\u{0}o0",
+  }
+  let first_reasoning : VisibleRow = {
+    item: {
+      kind: Reasoning,
+      content: "first thought",
+      ts: None,
+      sequence: Some(2),
+    },
+    identity: "s2\u{0}o0",
+  }
+  let first_tool : VisibleRow = {
+    item: {
+      kind: Tool(
+        call_id="c1",
+        name="read",
+        arguments=Some("{}"),
+        has_result=true,
+        is_error=false,
+        brief=Some("read moon.mod"),
+      ),
+      content: "result",
+      ts: None,
+      sequence: Some(2),
+    },
+    identity: "s2\u{0}o2",
+  }
+  let first_narration : VisibleRow = {
+    item: {
+      kind: Assistant(is_danger=false),
+      content: "I will inspect the project.",
+      ts: None,
+      sequence: Some(2),
+    },
+    identity: "s2\u{0}o1",
+  }
+  let second_reasoning : VisibleRow = {
+    item: {
+      kind: Reasoning,
+      content: "second thought",
+      ts: None,
+      sequence: Some(4),
+    },
+    identity: "s4\u{0}o0",
+  }
+  let goal_notice : VisibleRow = {
+    item: {
+      kind: Tool(
+        call_id="",
+        name="goal",
+        arguments=None,
+        has_result=true,
+        is_error=false,
+        brief=Some("Goal set"),
+      ),
+      content: "Ship it",
+      ts: None,
+      sequence: Some(3),
+    },
+    identity: "s3\u{0}o0",
+  }
+  let second_tool : VisibleRow = {
+    item: {
+      kind: Tool(
+        call_id="c2",
+        name="shell",
+        arguments=Some("{}"),
+        has_result=true,
+        is_error=false,
+        brief=Some("run moon check"),
+      ),
+      content: "ok",
+      ts: None,
+      sequence: Some(4),
+    },
+    identity: "s4\u{0}o1",
+  }
+  let answer : VisibleRow = {
+    item: {
+      kind: Assistant(is_danger=false),
+      content: "done",
+      ts: None,
+      sequence: Some(4),
+    },
+    identity: "s4\u{0}o2",
+  }
+  let input = Input(
+    source=OpenSeek,
+    focused=@interop.ChannelId::Local,
+    active_session="desktop-test",
+    root=None,
+    submission_generation=1,
+    items=[
+      user, first_reasoning, first_narration, first_tool, goal_notice, second_reasoning,
+      answer, second_tool,
+    ],
+    streaming_response=None,
+    streaming_identity="idle",
+  )
+  let renderer : TranscriptRenderer = {
+    input,
+    on_open: _ => @cmd.none,
+    on_jump: _ => @cmd.none,
+    on_open_session: _ => @cmd.none,
+  }
+  let children = renderer.stream_children()
+  let keys = children.to_array().map(pair => pair.0)
+  assert_eq(keys, [
+    "row\u{0}s1\u{0}o0", "rule\u{0}s1\u{0}o0", "row\u{0}s2\u{0}o1",
+    "activity\u{0}after\u{0}s1\u{0}o0", "activity\u{0}after\u{0}s2\u{0}o1",
+    "row\u{0}s4\u{0}o2", "activity\u{0}after\u{0}s3\u{0}o0",
+  ])
+  let first_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
+  })
+  let second_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(children["activity\u{0}after\u{0}s3\u{0}o0"])
+  })
+  let notice_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(children["activity\u{0}after\u{0}s2\u{0}o1"])
+  })
+  assert_true(first_markup.contains(step_summary(1, "")))
+  assert_true(first_markup.contains("first thought"))
+  assert_false(first_markup.contains("second thought"))
+  assert_true(second_markup.contains(step_summary(2, "")))
+  assert_true(second_markup.contains("second thought"))
+  assert_false(second_markup.contains("first thought"))
+  assert_true(notice_markup.contains("Goal set"))
+  assert_false(notice_markup.contains("second thought"))
+  assert_false(second_markup.contains("Goal set"))
+}
+
+///|
+/// A durable assistant event appends its tool calls after its prose, and the
+/// transcript must display them in that order too: narration first, the step's
+/// combined activity after it. The activity keeps its key on the pre-step
+/// boundary so the settled card still reuses the live disclosure.
+#warnings("-alert_unstable")
+test "a durable step with prose and tool calls renders its prose first" {
+  let user : VisibleRow = {
+    item: { kind: User, content: "question", ts: None, sequence: Some(1), },
+    identity: "s1\u{0}o0",
+  }
+  let narration : VisibleRow = {
+    item: {
+      kind: Assistant(is_danger=false),
+      content: "I will inspect the project.",
+      ts: None,
+      sequence: Some(2),
+    },
+    identity: "s2\u{0}o0",
+  }
+  let tool : VisibleRow = {
+    item: {
+      kind: Tool(
+        call_id="c1",
+        name="read",
+        arguments=Some("{}"),
+        has_result=true,
+        is_error=false,
+        brief=Some("read moon.mod"),
+      ),
+      content: "result",
+      ts: None,
+      sequence: Some(2),
+    },
+    identity: "s2\u{0}o1",
+  }
+  let input = Input(
+    source=OpenSeek,
+    focused=@interop.ChannelId::Local,
+    active_session="desktop-test",
+    root=None,
+    submission_generation=1,
+    items=[user, narration, tool],
+    streaming_response=None,
+    streaming_identity="idle",
+  )
+  let children = (
+    {
+      input,
+      on_open: _ => @cmd.none,
+      on_jump: _ => @cmd.none,
+      on_open_session: _ => @cmd.none,
+    } : TranscriptRenderer).stream_children()
+  let keys = children.to_array().map(pair => pair.0)
+  assert_eq(keys, [
+    "row\u{0}s1\u{0}o0", "rule\u{0}s1\u{0}o0", "row\u{0}s2\u{0}o0",
+    "activity\u{0}after\u{0}s1\u{0}o0",
+  ])
+  let activity_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
+  })
+  // A tool-only step's heading is the bare ordinal, no label separator.
+  assert_true(activity_markup.contains("#1</span>"))
+  assert_true(
+    activity_markup.contains(
+      "<span class=\"tool-call-text\">read moon.mod</span>",
+    ),
+  )
+  assert_false(activity_markup.contains("I will inspect the project."))
+}
+
+///|
+#warnings("-alert_unstable")
+test "live step hands off to its durable assistant card key" {
+  let user : VisibleRow = {
+    item: { kind: User, content: "question", ts: None, sequence: Some(1), },
+    identity: "s1\u{0}o0",
+  }
+  let first : VisibleRow = {
+    item: {
+      kind: Tool(
+        call_id="c1",
+        name="read",
+        arguments=Some("{}"),
+        has_result=true,
+        is_error=false,
+        brief=Some("read moon.mod"),
+      ),
+      content: "result",
+      ts: None,
+      sequence: Some(2),
+    },
+    identity: "s2\u{0}o0",
+  }
+  let live_input = Input(
+    source=OpenSeek,
+    focused=@interop.ChannelId::Local,
+    active_session="desktop-test",
+    root=None,
+    submission_generation=1,
+    items=[user, first],
+    streaming_response=None,
+    streaming_reasoning="next thought",
+    streaming_identity="r7",
+  )
+  let live_renderer : TranscriptRenderer = {
+    input: live_input,
+    on_open: _ => @cmd.none,
+    on_jump: _ => @cmd.none,
+    on_open_session: _ => @cmd.none,
+  }
+  let live = live_renderer.stream_children()
+  let first_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(live["activity\u{0}after\u{0}s1\u{0}o0"])
+  })
+  // A tool-only step has no thought fold: its ordinal sits on a plain heading
+  // line and the call itself is on display as its own row.
+  assert_true(first_markup.contains("activity-heading"))
+  assert_true(first_markup.contains("#1</span>"))
+  assert_true(
+    first_markup.contains("<span class=\"tool-call-text\">read moon.mod</span>"),
+  )
+  assert_false(first_markup.contains("<details class=\"activity\""))
+  let handoff_key = "activity\u{0}after\u{0}s2\u{0}o0"
+  assert_true(live.get(handoff_key) is Some(_))
+  let live_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(live[handoff_key])
+  })
+  assert_true(live_markup.contains(step_summary(2, "Thinking…")))
+  assert_true(live_markup.contains("<details class=\"activity\" open"))
+
+  let settled_input = {
+    ..live_input,
+    items: [
+      user,
+      first,
+      {
+        item: {
+          kind: Reasoning,
+          content: "next thought",
+          ts: None,
+          sequence: Some(4),
+        },
+        identity: "s4\u{0}o0",
+      },
+      {
+        item: {
+          kind: Assistant(is_danger=false),
+          content: "answer",
+          ts: None,
+          sequence: Some(4),
+        },
+        identity: "s4\u{0}o1",
+      },
+    ],
+    streaming_reasoning: None,
+  }
+  let settled = { ..live_renderer, input: settled_input, }.stream_children()
+  assert_true(settled.get(handoff_key) is Some(_))
+  let settled_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(settled[handoff_key])
+  })
+  assert_true(settled_markup.contains(step_summary(2, "Thought")))
+  assert_true(settled_markup.contains("next thought"))
+  assert_false(settled_markup.contains("<details class=\"activity\" open"))
+}
+
+///|
+#warnings("-alert_unstable")
+test "an ambiguous commit-first prefix keeps live reasoning visible" {
+  let rows : Array[VisibleRow] = [
+    {
+      item: { kind: User, content: "question", ts: None, sequence: Some(1), },
+      identity: "s1\u{0}o0",
+    },
+    {
+      item: {
+        kind: Reasoning,
+        content: "complete thought",
+        ts: None,
+        sequence: Some(2),
+      },
+      identity: "s2\u{0}o0",
+    },
+    {
+      item: {
+        kind: Assistant(is_danger=false),
+        content: "I will inspect it.",
+        ts: None,
+        sequence: Some(2),
+      },
+      identity: "s2\u{0}o1",
+    },
+    {
+      item: {
+        kind: Tool(
+          call_id="c1",
+          name="read",
+          arguments=Some("{}"),
+          has_result=false,
+          is_error=false,
+          brief=None,
+        ),
+        content: "",
+        ts: None,
+        sequence: Some(2),
+      },
+      identity: "s2\u{0}o2",
+    },
+    {
+      item: {
+        kind: Reasoning,
+        content: "later thought",
+        ts: None,
+        sequence: Some(3),
+      },
+      identity: "s3\u{0}o0",
+    },
+    {
+      item: {
+        kind: Assistant(is_danger=false),
+        content: "A later step also committed.",
+        ts: None,
+        sequence: Some(3),
+      },
+      identity: "s3\u{0}o1",
+    },
+  ]
+  let input = Input(
+    source=OpenSeek,
+    focused=@interop.ChannelId::Local,
+    active_session="desktop-test",
+    root=None,
+    submission_generation=1,
+    items=rows,
+    streaming_response=None,
+    streaming_reasoning="complete",
+    streaming_identity="r7",
+  )
+  let children = (
+    {
+      input,
+      on_open: _ => @cmd.none,
+      on_jump: _ => @cmd.none,
+      on_open_session: _ => @cmd.none,
+    } : TranscriptRenderer).stream_children()
+  let keys = children.to_array().map(pair => pair.0)
+  assert_eq(keys, [
+    "row\u{0}s1\u{0}o0", "rule\u{0}s1\u{0}o0", "row\u{0}s2\u{0}o1",
+    "activity\u{0}after\u{0}s1\u{0}o0", "row\u{0}s3\u{0}o1",
+    "activity\u{0}after\u{0}s2\u{0}o1", "activity\u{0}after\u{0}s3\u{0}o1",
+  ])
+  let markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
+  })
+  assert_true(markup.contains(step_summary(1, "Thought")))
+  assert_true(markup.contains("<span class=\"tool-call-text\">read</span>"))
+  assert_true(markup.contains("complete thought"))
+  assert_false(markup.contains("activity-thinking-live"))
+  assert_false(markup.contains("#2"))
+  let later_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(children["activity\u{0}after\u{0}s2\u{0}o1"])
+  })
+  assert_true(later_markup.contains(step_summary(2, "Thought")))
+  assert_true(later_markup.contains("later thought"))
+  assert_false(later_markup.contains("activity-thinking-live"))
+  assert_false(later_markup.contains("#3"))
+  let live_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(children["activity\u{0}after\u{0}s3\u{0}o1"])
+  })
+  assert_true(live_markup.contains(step_summary(3, "Thinking…")))
+  assert_true(live_markup.contains("complete"))
+  assert_true(live_markup.contains("activity-thinking-live"))
+}
+
+///|
+#warnings("-alert_unstable")
+test "live reasoning is plain text and keeps the durable activity key" {
+  let user : VisibleRow = {
+    item: { kind: User, content: "question", ts: None, sequence: Some(1), },
+    identity: "s1\u{0}o0",
+  }
+  let live_input = Input(
+    source=OpenSeek,
+    focused=@interop.ChannelId::Local,
+    active_session="desktop-test",
+    root=None,
+    submission_generation=1,
+    items=[user],
+    streaming_response=None,
+    streaming_reasoning="*unfinished*\nnext",
+    streaming_identity="r7",
+  )
+  let live_renderer : TranscriptRenderer = {
+    input: live_input,
+    on_open: _ => @cmd.none,
+    on_jump: _ => @cmd.none,
+    on_open_session: _ => @cmd.none,
+  }
+  let live_children = live_renderer.stream_children()
+  assert_true(live_children.get("activity\u{0}after\u{0}s1\u{0}o0") is Some(_))
+  let live_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(live_children["activity\u{0}after\u{0}s1\u{0}o0"])
+  })
+  assert_true(live_markup.contains("*unfinished*\nnext"))
+  assert_false(live_markup.contains("<em>unfinished</em>"))
+  assert_true(live_markup.contains("<details class=\"activity\" open"))
+
+  let complete_renderer = {
+    ..live_renderer,
+    input: { ..live_input, reasoning_complete: true, },
+  }
+  let complete_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(
+      complete_renderer.stream_children()["activity\u{0}after\u{0}s1\u{0}o0"],
+    )
+  })
+  assert_true(complete_markup.contains("<em>unfinished</em>"))
+
+  let settled = {
+    ..live_input,
+    items: [
+      user,
+      {
+        item: {
+          kind: Reasoning,
+          content: "*unfinished*\nnext",
+          ts: None,
+          sequence: Some(2),
+        },
+        identity: "s2\u{0}o0",
+      },
+      {
+        item: {
+          kind: Assistant(is_danger=false),
+          content: "answer",
+          ts: None,
+          sequence: Some(2),
+        },
+        identity: "s2\u{0}o1",
+      },
+    ],
+    streaming_reasoning: None,
+  }
+  let settled_renderer = { ..live_renderer, input: settled, }
+  let settled_children = settled_renderer.stream_children()
+  assert_true(
+    settled_children.get("activity\u{0}after\u{0}s1\u{0}o0") is Some(_),
+  )
+  let settled_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(settled_children["activity\u{0}after\u{0}s1\u{0}o0"])
+  })
+  assert_true(settled_markup.contains("<em>unfinished</em>"))
+}
+
+///|
 test "transcript stream section key scopes equal session ids by channel" {
   let local_input = Input(
     source=OpenSeek,
