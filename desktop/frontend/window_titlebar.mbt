@@ -11,7 +11,7 @@ const WindowTitlebarExcludedSelector = "button, a, input, textarea, select, [rol
 
 ///|
 fn window_titlebar_platform_supports_overlay(platform : String) -> Bool {
-  browser_platform_is_apple(platform) || @base_common.is_windows
+  browser_platform_is_apple(platform) || @common.is_windows
 }
 
 ///|

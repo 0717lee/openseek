@@ -1889,7 +1889,7 @@ fn app_shell_class(
   if is_desktop && browser_platform_is_apple(platform) {
     classes.push("native-titlebar-overlay")
     classes.push("native-apple-titlebar")
-  } else if is_desktop && @base_common.is_windows {
+  } else if is_desktop && @common.is_windows {
     classes.push("native-titlebar-overlay")
     classes.push("native-windows-titlebar")
   }
