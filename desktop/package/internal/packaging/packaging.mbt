@@ -618,13 +618,28 @@ async fn Workspace::require_fresh_prebuilt_artifacts(
 }
 
 ///|
-/// Recursively copy a directory tree, replacing the destination. Uses the
-/// host's `cp -R`; packaging runs on the build host so this stays simple.
+/// Recursively copy a directory tree, replacing the destination. Walks the
+/// tree with `@asyncfs` instead of shelling out to `cp`, which stock Windows
+/// does not have on PATH.
 pub async fn copy_tree(source : String, destination : String) -> Unit {
   remove_path_if_exists(destination)
-  let parent = (destination : @path.Path).dirname().to_string()
-  ensure_dir(parent)
-  run_checked("cp", ["-R", source, destination], dir=parent)
+  ensure_dir(destination)
+  for entry in @asyncfs.readdir(source, sort=true) {
+    let entry_source = join_path(source, entry)
+    let entry_destination = join_path(destination, entry)
+    if @asyncfs.kind(entry_source) is Directory {
+      copy_tree(entry_source, entry_destination)
+    } else {
+      copy_file(entry_source, entry_destination)
+      // `cp -R` preserved the executable bit, and bundled helpers such as
+      // the CEF runtime's `bin/cef_process` rely on it. Windows has no
+      // executable bit and `@asyncfs.chmod` raises there.
+      if !(@platform.win32 || @platform.win64) &&
+        @asyncfs.can_execute(entry_source) {
+        @asyncfs.chmod(entry_destination, 0o755)
+      }
+    }
+  }
 }
 
 ///|
