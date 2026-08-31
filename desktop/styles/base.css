@@ -280,10 +280,49 @@ html {
   display: none;
 }
 
-/* Proton's overlay titlebar lets the page palette paint the native chrome,
-   but macOS keeps its traffic-light controls in the top-left corner. Reserve
-   that native hit area only in the Apple desktop shell. The four rules cover
-   the same sidebar toggle in each place it can live: open sidebar, ordinary
+/* Proton's overlay titlebar lets the page palette paint the native chrome.
+   Empty chrome drags the native window; every interactive descendant opts
+   back out. The inline mirror in window_titlebar.mbt makes CEF publish the
+   initial regions after DOM creation. */
+.app.native-titlebar-overlay .sidebar-header,
+.app.native-titlebar-overlay .topbar,
+.app.native-titlebar-overlay .editor-tabsbar,
+.app.native-titlebar-overlay .window-titlebar-drag-strip {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.app.native-titlebar-overlay
+  :is(.sidebar-header, .topbar, .editor-tabsbar)
+  :is(
+    button,
+    a,
+    input,
+    textarea,
+    select,
+    [role="button"],
+    [contenteditable="true"],
+    .editor-tab,
+    .dock-menu
+  ) {
+  -webkit-app-region: no-drag;
+}
+
+/* Pages without a visible topbar still need one real DOM drag target. It
+   occupies only the otherwise-empty native chrome band; the fixed sidebar
+   toggle has the higher stacking level and remains interactive. */
+.window-titlebar-page {
+  position: relative;
+}
+.window-titlebar-drag-strip {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 2;
+  height: 46px;
+}
+
+/* macOS keeps its traffic-light controls in the top-left corner. Reserve that
+   native hit area only in the Apple desktop shell. The four rules cover the
+   same sidebar toggle in each place it can live: open sidebar, ordinary
    collapsed topbar, Settings/Skills fallback, and expanded editor overlay. */
 .app.native-apple-titlebar {
   --native-titlebar-leading-inset: 88px;
@@ -303,6 +342,40 @@ html {
   .content.panel-expanded
   .editor-tabsbar {
   padding-left: calc(var(--native-titlebar-leading-inset) + 40px);
+}
+
+/* Windows keeps its real minimize/maximize/close cluster in the top-right.
+   Compact all app header variants to one 40px row and reserve the live
+   caption-button width on whichever column reaches the window edge. 150px is
+   Proton's Windows overlay reserve at 100% scale; CSS pixels and native
+   logical coordinates scale together at higher DPI. */
+.app.native-windows-titlebar {
+  --native-titlebar-height: 40px;
+  --native-titlebar-caption-inset: 150px;
+}
+.app.native-windows-titlebar main {
+  --topbar-height: var(--native-titlebar-height);
+}
+.app.native-windows-titlebar .sidebar-header,
+.app.native-windows-titlebar .editor-tabsbar {
+  height: var(--native-titlebar-height);
+}
+.app.native-windows-titlebar .content:not(.panel-open) .topbar {
+  padding-right: var(--native-titlebar-caption-inset);
+}
+.app.native-windows-titlebar .content.panel-open .editor-tabsbar {
+  padding-right: var(--native-titlebar-caption-inset);
+}
+.app.native-windows-titlebar .window-titlebar-drag-strip {
+  right: var(--native-titlebar-caption-inset);
+  height: var(--native-titlebar-height);
+}
+.app.native-windows-titlebar.sidebar-collapsed .page-sidebar-toggle,
+.app.native-windows-titlebar.sidebar-collapsed
+  .content.panel-expanded
+  .topbar
+  > .topbar-toggle {
+  top: 6px;
 }
 
 /* The conversation (left) and the editor (right) live side by side as two

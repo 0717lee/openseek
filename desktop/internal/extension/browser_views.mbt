@@ -23,6 +23,8 @@ pub fn BrowserViews::window_ready(
   window : @proton.WindowHandle,
 ) -> Unit {
   self.window = Some(window)
+  let dark = (window.state().theme == "dark") catch { _ => false }
+  let _ = @platform.set_titlebar_dark_mode(dark)
 }
 
 ///|
@@ -88,6 +90,7 @@ priv suberror BrowserViewError {
   WindowNotReady
   UnknownView(Int)
   BlockedURL(String)
+  TitlebarThemeUnavailable
 } derive(Debug)
 
 ///|
@@ -96,6 +99,8 @@ impl Show for BrowserViewError with fn output(self, logger) {
     WindowNotReady => logger.write_string("The desktop window is not ready")
     UnknownView(id) => logger.write_string("Unknown browser view \{id}")
     BlockedURL(url) => logger.write_string("Blocked non-web page URL: \{url}")
+    TitlebarThemeUnavailable =>
+      logger.write_string("The Windows titlebar theme could not be applied")
   }
 }
 
@@ -277,6 +282,18 @@ fn BrowserViews::open_app_devtools(
 }
 
 ///|
+fn BrowserViews::set_app_titlebar_theme(
+  self : BrowserViews,
+  payload : @protocol.AppTitlebarThemePayload,
+) -> @protocol.EmptyReply raise {
+  let _ = self.attached_window()
+  guard @platform.set_titlebar_dark_mode(payload.dark) else {
+    raise TitlebarThemeUnavailable
+  }
+  Acknowledged
+}
+
+///|
 /// Match the native titlebar's double-click convention. Reading and applying
 /// the state in one window-side command keeps the frontend from mirroring a
 /// value that can also change through the operating system's window controls.
@@ -359,6 +376,9 @@ fn window_endpoints(views : BrowserViews) -> Array[@endpoint.Endpoint] {
     @endpoint.Endpoint::window(@commands.app_open_devtools, (_, _) => {
       views.open_app_devtools()
     }),
+    @endpoint.Endpoint::window(@commands.app_set_titlebar_theme, (_, payload) => {
+      views.set_app_titlebar_theme(payload)
+    }),
     @endpoint.Endpoint::window(@commands.app_toggle_maximized, (_, _) => {
       views.toggle_app_maximized()
     }),
@@ -384,6 +404,11 @@ test "native window ops are absent from the relay method catalog" {
     window_only
     .iter()
     .any(endpoint => endpoint.name() == @commands.app_toggle_maximized.name()),
+  )
+  assert_true(
+    window_only
+    .iter()
+    .any(endpoint => endpoint.name() == @commands.app_set_titlebar_theme.name()),
   )
   for endpoint in window_only {
     let name = endpoint.name()

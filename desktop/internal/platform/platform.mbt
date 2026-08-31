@@ -18,6 +18,36 @@ pub fn is_darwin() -> Bool {
 extern "C" fn windows_open(target : String) -> Int = "moonbit_openseek_desktop_platform_open"
 
 ///|
+extern "C" fn windows_set_titlebar_dark_mode(dark : Int) -> Int = "moonbit_openseek_desktop_platform_set_titlebar_dark_mode"
+
+///|
+fn titlebar_dark_mode_flag(dark : Bool) -> Int {
+  if dark {
+    1
+  } else {
+    0
+  }
+}
+
+///|
+/// Keep the native Windows caption glyphs aligned with the app's effective
+/// palette. The C side retains this preference across activation and DPI
+/// changes because Proton 0.1.x reapplies its own overlay frame there.
+/// TODO(https://github.com/moonbit-community/proton/issues/214): After adopting
+/// a Proton release that resolves this issue, remove this host-owned Win32
+/// workaround, including its FFI entry point and window subclass.
+pub fn set_titlebar_dark_mode(dark : Bool) -> Bool {
+  guard @sys.win32 || @sys.win64 else { return true }
+  windows_set_titlebar_dark_mode(titlebar_dark_mode_flag(dark)) == 0
+}
+
+///|
+test "titlebar theme converts the effective palette to a native flag" {
+  assert_eq(titlebar_dark_mode_flag(false), 0)
+  assert_eq(titlebar_dark_mode_flag(true), 1)
+}
+
+///|
 /// Hand `path` to the platform's default opener, returning its exit code. The
 /// opener returns as soon as it has handed the file off (LaunchServices on
 /// macOS, the desktop portal on Linux), so the code reports the hand-off, not

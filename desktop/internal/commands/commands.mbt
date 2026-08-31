@@ -662,6 +662,14 @@ pub let app_open_devtools : Command[
 ] = Command("app.open_devtools")
 
 ///|
+/// Match this native desktop window's caption controls to the effective app
+/// palette. Window-only: a relay browser has no local application window.
+pub let app_set_titlebar_theme : Command[
+  @protocol.AppTitlebarThemePayload,
+  @protocol.EmptyReply,
+] = Command("app.set_titlebar_theme")
+
+///|
 /// Toggle this native desktop window between its maximized and restored
 /// bounds. Window-only: a relay browser has no local application window.
 pub let app_toggle_maximized : Command[

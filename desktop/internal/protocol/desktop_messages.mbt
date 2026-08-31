@@ -754,6 +754,11 @@ pub(all) struct BrowserThemePayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+pub(all) struct AppTitlebarThemePayload {
+  dark : Bool
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
 pub(all) struct BrowserBoundsPayload {
   id : Int
   x : Int

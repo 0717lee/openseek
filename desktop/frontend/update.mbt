@@ -1880,7 +1880,7 @@ fn update_msg(
       }
       (
         @cmd.batch([
-          theme.apply(model.system_dark),
+          theme.apply(model.system_dark, model.is_desktop, dispatch),
           app_font.apply(),
           app_font_size.apply(),
           codex_cmd,
@@ -4024,7 +4024,7 @@ fn update_msg(
         System =>
           (
             @cmd.batch([
-              System.apply(dark),
+              System.apply(dark, model.is_desktop, dispatch),
               browser_set_theme_for_pages(dispatch, model, dark),
             ]),
             model,
@@ -4040,7 +4040,7 @@ fn update_msg(
       } else {
         (
           @cmd.batch([
-            theme.apply(model.system_dark),
+            theme.apply(model.system_dark, model.is_desktop, dispatch),
             browser_set_theme_for_pages(
               dispatch,
               model,
