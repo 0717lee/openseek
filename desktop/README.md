@@ -350,12 +350,12 @@ moon build . --target native --release
 
 On Windows, `native_link_config.mjs` passes GUI subsystem linker flags to the
 host executable so double-clicking `openseek-desktop.exe` does not open an extra
-terminal window. It detects common compiler driver styles, consulting
-`vswhere` for an installed MSVC toolchain (as Moon does) before assuming a
-`clang` found on `PATH` is the linker:
+terminal window. It detects common compiler driver styles, preferring Moon's
+explicit compiler and an installed MSVC toolchain before generic `CC`/`CXX`
+settings or a `clang` found on `PATH`:
 
 - `clang`/`clang++`: `-Wl,/SUBSYSTEM:WINDOWS -Wl,/ENTRY:mainCRTStartup`
-- `clang-cl`/`cl`: `/link /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup`
+- `clang-cl`/`cl`: `/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup`
 - MinGW/GCC: `-mwindows`
 
 Set `OPENSEEK_DESKTOP_LINK_STYLE=clang`, `msvc`, or `mingw` to override the

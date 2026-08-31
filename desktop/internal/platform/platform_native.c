@@ -19,6 +19,7 @@
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "user32.lib")
 #endif
 
 #define OPENSEEK_DWMWA_USE_IMMERSIVE_DARK_MODE 20

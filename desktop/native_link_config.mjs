@@ -48,8 +48,8 @@ function commandExists(env, command) {
   return false;
 }
 
-function configuredCompiler(env) {
-  for (const name of ["MOON_CC", "MOONBIT_CC", "MBC_CC", "CC", "CXX"]) {
+function configuredCompiler(env, names) {
+  for (const name of names) {
     const value = envValue(env, name).trim();
     if (value.length > 0) {
       return value;
@@ -129,20 +129,29 @@ function detectedLinkStyle(env) {
     default:
       break;
   }
-  const compiler = configuredCompiler(env);
-  const compilerStyle = linkStyleFromCompiler(compiler);
-  if (compilerStyle.length > 0) {
-    return compilerStyle;
+  const moonCompiler = configuredCompiler(env, [
+    "MOON_CC",
+    "MOONBIT_CC",
+    "MBC_CC",
+  ]);
+  const moonCompilerStyle = linkStyleFromCompiler(moonCompiler);
+  if (moonCompilerStyle.length > 0) {
+    return moonCompilerStyle;
   }
   const isWindows = process.platform === "win32" || env.OS === "Windows_NT";
   if (isWindows && (hasMsvcEnvironment(env) || hasMsvcToolchain(env))) {
     return "msvc-driver";
   }
-  if (commandExists(env, "clang")) {
-    return "clang-driver";
+  const genericCompiler = configuredCompiler(env, ["CC", "CXX"]);
+  const genericCompilerStyle = linkStyleFromCompiler(genericCompiler);
+  if (genericCompilerStyle.length > 0) {
+    return genericCompilerStyle;
   }
   if (commandExists(env, "clang-cl") || commandExists(env, "cl")) {
     return "msvc-driver";
+  }
+  if (commandExists(env, "clang")) {
+    return "clang-driver";
   }
   if (commandExists(env, "gcc") || commandExists(env, "g++")) {
     return "mingw-driver";
@@ -153,7 +162,7 @@ function detectedLinkStyle(env) {
 function windowsGuiLinkFlags(env) {
   switch (detectedLinkStyle(env)) {
     case "msvc-driver":
-      return "/link /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup";
+      return "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup";
     case "mingw-driver":
       return "-mwindows";
     case "clang-driver":
