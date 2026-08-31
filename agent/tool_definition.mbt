@@ -243,8 +243,8 @@ async test "a compile error after handoff keeps source diagnostics" {
     assert_true(result.is_error)
     assert_true(result.content.contains("source:"))
     assert_false(result.content.contains("openseek-compile-job-"))
-    // The session owns this directory after handoff. It remains available until
-    // teardown so any result files named by terminal output remain readable.
+    // The session-owned result container remains until teardown even though the
+    // disposable build subtree is reclaimed at terminal status.
     assert_true(@fs.exists("\{spill_dir}/snippet-0"))
     @fs.rmdir(spill_dir, recursive=true) catch {
       _ => ()
@@ -254,9 +254,9 @@ async test "a compile error after handoff keeps source diagnostics" {
 
 ///|
 /// A handed-off snippet may put a bulky result in its policy-owned temp area
-/// and print the path. Terminal status must not delete that result before the
-/// completion notice can be acted on; the session teardown owns reclamation.
-async test "a handed-off job keeps result files until session teardown" {
+/// and print the path. Terminal status reclaims compiler artifacts without
+/// deleting that result before the completion notice can be acted on.
+async test "a handed-off job cleans builds but keeps result files until teardown" {
   @async.with_task_group(group => {
     let spill_dir = @fs.tmpdir(prefix="openseek-job-result-")
     let bg_runtime = @bgjobs.BgJobRuntime(AgentTaskScope(group), spill_dir~)
@@ -289,6 +289,19 @@ async test "a handed-off job keeps result files until session teardown" {
     guard read is Respond(result) else { fail("expected Respond") }
     assert_false(result.is_error)
     assert_eq(@fs.read_file(result_path).text(), "kept")
+    let build_dir = "\{spill_dir}/snippet-0/build"
+    let mut build_reclaimed = !@fs.exists(build_dir)
+    // job_output may observe the terminal state just before its cleanup callback
+    // finishes, so wait for that callback rather than racing it.
+    for _ in 0..<400 {
+      if !@fs.exists(build_dir) {
+        build_reclaimed = true
+        break
+      }
+      @async.sleep(25)
+    }
+    assert_true(build_reclaimed)
+    assert_true(@fs.exists("\{spill_dir}/snippet-0/tmp"))
     @fs.rmdir(spill_dir, recursive=true) catch {
       _ => ()
     }
