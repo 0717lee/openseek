@@ -1112,6 +1112,9 @@ fn show_file_in_viewer(
     // jump's reveal and annotation still apply below, over the kept document.
     let code_model = viewer.get_model()
     let markdown_model = markdown_viewer.get_model()
+    let same_code_resource = !show_markdown &&
+      code_model is Some(current) &&
+      current.uri.to_string() == uri.to_string()
     let same_document = if show_markdown {
       markdown_model is Some(current) &&
       current.model.uri.to_string() == uri.to_string() &&
@@ -1138,8 +1141,16 @@ fn show_file_in_viewer(
     if viewer_state.search_match_highlights is Some(highlights) {
       highlights.clear()
     }
-    if !same_document {
-      // Park the outgoing document's scroll position for its tab's return.
+    if same_code_resource && !same_document {
+      // VS Code reloads an existing text-file model in place. The readonly
+      // Viewer uses its whole-value flush lane, bracketed by view-state
+      // persistence so folding contribution state survives the decorations
+      // that `set_value` deliberately destroys.
+      let current_view_state = viewer.save_view_state()
+      viewer.set_value(content)
+      viewer.restore_view_state(current_view_state)
+    } else if !same_document {
+      // Park the outgoing document's view state for its tab's return.
       if viewer_state.relative is Some(prev) {
         if code_model is Some(_) && viewer.save_view_state() is Some(view_state) {
           viewer_state.view_states[prev.0] = view_state
@@ -1191,17 +1202,20 @@ fn show_file_in_viewer(
         }
         viewer.set_model(Some(text_model))
         dispose_source_model(code_model)
-        if restore_view_state &&
+        let restored_code_view_state = if restore_view_state &&
           relative is Some(rel) &&
           viewer_state.view_states.get(rel.0) is Some(saved) {
           viewer.restore_view_state(Some(saved))
+          true
+        } else {
+          false
         }
         // Match the reference workbench's host policy: ordinary `.mbt` files
         // open as a top-level outline. `set_model` computes folding ranges
         // synchronously, so this is stable initialization state rather than a
-        // delayed render effect. Keeping it in the fresh-model branch leaves
-        // folding interactions on the current model user-controlled.
-        if should_auto_fold_top_level(text_model) {
+        // delayed render effect. A restored state already carries the user's
+        // fold choices, so the initial policy must not run over it.
+        if !restored_code_view_state && should_auto_fold_top_level(text_model) {
           viewer.fold_top_level()
         }
       }

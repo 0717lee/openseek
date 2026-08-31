@@ -91,6 +91,25 @@
     transparent
   );
 
+  /* Native overflow panes use a 12px hit lane; a 1px inset leaves a 10px
+     visible thumb. */
+  --scrollbar-size: 12px;
+  --color-scrollbar-thumb: color-mix(
+    in srgb,
+    var(--color-text-primary) 32%,
+    transparent
+  );
+  --color-scrollbar-thumb-hover: color-mix(
+    in srgb,
+    var(--color-text-primary) 48%,
+    transparent
+  );
+  --color-scrollbar-thumb-active: color-mix(
+    in srgb,
+    var(--color-text-primary) 64%,
+    transparent
+  );
+
   /* Shape and elevation */
   --radius-xs: 4px;
   --radius-sm: 6px;

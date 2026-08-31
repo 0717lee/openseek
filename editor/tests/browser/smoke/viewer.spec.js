@@ -9,6 +9,7 @@ import {
 } from '../support/app.js';
 
 const mainFixture = 'tests/fixtures/workspace/src/main.mbt';
+const eventsFixture = 'tests/fixtures/workspace/src/events.mbt';
 
 async function waitForSourceText(page, needle) {
   await expect
@@ -577,6 +578,7 @@ test('updates and recovers watched fixture files from disk changes', async ({ pa
     await page.goto('/');
     await openMainFixture(page);
     await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+    await unfoldMainBody(page);
 
     await fs.writeFile(
       mainFixture,
@@ -584,7 +586,9 @@ test('updates and recovers watched fixture files from disk changes', async ({ pa
       'utf8',
     );
     await waitForSourceText(page, 'println("synced from disk")');
-    await unfoldMainBody(page);
+    await expect(
+      page.locator('.margin-view-overlays .cldr.codicon-folding-collapsed'),
+    ).toHaveCount(0);
     await expect(page.locator('.mtk5')).toContainText('"synced from disk"', {
       timeout: 7_000,
     });
@@ -610,6 +614,34 @@ test('updates and recovers watched fixture files from disk changes', async ({ pa
     });
   } finally {
     await fs.writeFile(mainFixture, original, 'utf8');
+  }
+});
+
+test('preserves mixed folding state across watched disk changes', async ({ page }) => {
+  const original = await fs.readFile(eventsFixture, 'utf8');
+
+  try {
+    await page.goto('/');
+    await openWorkspaceFile(page, 'src/events.mbt');
+
+    const editor = page.locator('.monaco-editor.readonly-editor');
+    const collapsed = page.locator(
+      '.margin-view-overlays .cldr.codicon-folding-collapsed',
+    );
+    await expect(collapsed).toHaveCount(2);
+    await collapsed.first().click({ force: true });
+    await expect(editor).toContainText('message : String');
+    await expect(editor).not.toContainText('readonly fixture ready');
+    await expect(collapsed).toHaveCount(1);
+
+    await fs.writeFile(eventsFixture, `${original}\n// watched refresh\n`, 'utf8');
+    await waitForSourceText(page, '// watched refresh');
+
+    await expect(editor).toContainText('message : String');
+    await expect(editor).not.toContainText('readonly fixture ready');
+    await expect(collapsed).toHaveCount(1);
+  } finally {
+    await fs.writeFile(eventsFixture, original, 'utf8');
   }
 });
 

@@ -1,10 +1,16 @@
 ///|
-/// A snippet is bounded to this wall-clock so a runaway loop or a build that
-/// never finishes cannot block the whole turn. On expiry the run is cancelled
-/// (which tears down the moon subprocess) and reported as a timeout. Sized for
-/// commands, not just compute: a snippet runs whole `moon test` cycles, and a
-/// fresh workspace's first build downloads and compiles its dependencies.
-const RunTimeoutMs : Int = 300_000
+/// How long a runtime-backed run stays inline before it is adopted as a job.
+/// Five seconds keeps quick probes inline while moving builds, suites, and
+/// watchers out of the turn without asking the model to predict their duration.
+const AutoBackgroundAfterMs : Int = 5_000
+
+///|
+/// Runtime-less foreground work is bounded to this wall-clock so a runaway loop
+/// or build cannot block the whole turn. On expiry it is cancelled and reported
+/// as a timeout. Sized for commands, not just compute: a snippet runs whole
+/// `moon test` cycles, and a fresh workspace's first build downloads and
+/// compiles its dependencies.
+const ForegroundTimeoutMs : Int = 300_000
 
 ///|
 /// Output is streamed to a file on disk, not buffered in memory, so a snippet
@@ -22,6 +28,17 @@ const OutputCapBytes : Int = 48_000
 /// and promotes it back to an error. Keep this mnemonic list maintained by
 /// hand; `unused_mut` intentionally remains suppressed for throwaway snippets.
 const WarnOffList : String = "-a+partial_match@partial_match+multiline_string_escape@multiline_string_escape+invalid_inline_wasm@invalid_inline_wasm+unannotated_ffi@unannotated_ffi"
+
+///|
+/// Render an injected millisecond bound without losing sub-second precision in
+/// model-facing text or tool results.
+fn duration_label(milliseconds : Int) -> String {
+  if milliseconds % 1000 == 0 {
+    "\{milliseconds / 1000}s"
+  } else {
+    "\{milliseconds}ms"
+  }
+}
 
 ///|
 /// Tool definition for `mbtx`: compile and run a self-contained MoonBit
@@ -71,9 +88,8 @@ const WarnOffList : String = "-a+partial_match@partial_match+multiline_string_es
 /// it, so `read_only=true` puts "may not write source" in the kernel.
 ///
 /// `approval` is where a request to run OUTSIDE the sandbox goes. Its presence
-/// is what advertises the `escalated` argument at all — the same rule
-/// `bg_runtime` follows for `run_in_background`: a build with nobody to ask
-/// does not offer an argument whose every use would come back refused.
+/// is what advertises the `escalated` argument at all: a build with nobody to
+/// ask does not offer an argument whose every use would come back refused.
 pub fn definition(
   workspace_root~ : String,
   read_only? : Bool = false,
@@ -81,7 +97,8 @@ pub fn definition(
   job_dir? : String,
   scratch_dir? : String,
   worker_sandbox? : WorkerSandbox,
-  run_timeout_ms? : Int = RunTimeoutMs,
+  auto_background_after_ms? : Int = AutoBackgroundAfterMs,
+  foreground_timeout_ms? : Int = ForegroundTimeoutMs,
   approval? : @agent_runtime.ApprovalChannel,
 ) -> @agent_tool.AgentToolDefinition {
   // Background snippet directories are numbered inside the caller's scratch
@@ -94,10 +111,10 @@ pub fn definition(
     description=description(
       background=bg_runtime is Some(_),
       escalation=approval is Some(_),
+      auto_background_after_ms~,
+      foreground_timeout_ms~,
     ),
-    schema=JsonSchema(
-      schema(background=bg_runtime is Some(_), escalation=approval is Some(_)),
-    ),
+    schema=JsonSchema(schema(escalation=approval is Some(_))),
     execute=Async(arguments => {
       execute(
         workspace_root,
@@ -107,7 +124,8 @@ pub fn definition(
         job_dir?,
         scratch_dir?,
         worker_sandbox?,
-        run_timeout_ms~,
+        auto_background_after_ms~,
+        foreground_timeout_ms~,
         next_background~,
         approval?,
       )
@@ -160,9 +178,10 @@ async fn execute(
   job_dir? : String,
   scratch_dir? : String,
   worker_sandbox? : WorkerSandbox,
-  // The wall-clock bound, injectable so a test can exercise the deadline
-  // without waiting out the real one.
-  run_timeout_ms~ : Int,
+  // Independent injectable bounds: a runtime-backed run hands off at the first;
+  // a runtime-less run is cancelled at the second.
+  auto_background_after_ms~ : Int,
+  foreground_timeout_ms~ : Int,
   next_background~ : Ref[Int],
   approval? : @agent_runtime.ApprovalChannel,
 ) -> @agent_tool.ToolAction {
@@ -215,12 +234,6 @@ async fn execute(
   // a possibly-large output log when a turn is cancelled mid-run. The timeout
   // wraps only the process body; output is redirected to a file (not buffered in
   // memory) and read back capped, so a flood cannot exhaust memory.
-  if input.run_in_background && bg_runtime is None {
-    return @agent_tool.respond(
-      "error: run_in_background is not available in this context",
-      is_error=true,
-    )
-  }
   // Escalation only means something on the backend the policy binds. The other
   // targets never had `--wasm-policy` passed to them in the first place — they
   // cannot spawn or touch files at all — so asking here would spend a person's
@@ -266,13 +279,18 @@ async fn execute(
   } else {
     false
   }
-  // A directory a job may take over must outlive this call, so it is numbered
-  // inside the caller's job dir — reclaimed when the session's scope ends —
-  // rather than a system temp dir that only this function ever revisits. That
-  // covers BOTH ways a job takes over: an explicit `run_in_background`, and a
-  // foreground run detached at its deadline, which is why this does not test
-  // `run_in_background`.
-  let background = input.run_in_background
+  // One source of truth for whether moonrun's policy actually governs this
+  // execution. The launch argv, adopted-job metadata, and foreground refusal
+  // classifier must not drift: ordinary output from a non-wasm or escalated run
+  // is never evidence of a policy that was not active.
+  let policy_active = input.target == "wasm" && !escalated
+  let handoff_dir_has_owner = job_dir is Some(_) || scratch_dir is Some(_)
+  // A directory that an automatic handoff may give to a job must outlive this
+  // call, so it is numbered inside a caller-owned job dir or scratch lab when
+  // one exists. Such a job keeps the whole directory until teardown: its `tmp`
+  // subtree is the snippet's writable result area, and deleting it at terminal
+  // status would make paths in completion output unreadable before the model can
+  // act on them.
   let dir = if job_dir is Some(scratch) {
     let dir = "\{scratch}/snippet-\{next_background.val}"
     next_background.val += 1
@@ -312,16 +330,14 @@ async fn execute(
         )
     }
   }
-  // Set once a background job takes over the directory (snippet, artifacts,
-  // output log): either an explicit `run_in_background`, or a foreground run
-  // detached at its deadline. `cleanup` runs on every exit path, so the flag —
-  // not the request — decides whether reclaiming the directory is still ours.
+  // Set once an automatically handed-off job takes over the directory (snippet,
+  // artifacts, and output log). `cleanup` runs on every exit path, so the flag
+  // decides whether reclaiming the directory is still ours.
   //
-  // Handing it over is sound because a job only ever runs with a `job_dir`
-  // wired, and that directory is reclaimed with the session's scope. The
-  // `@fs.tmpdir` branch above has no such owner, but it is only taken when the
-  // caller wired no job dir — which happens only if the session's own tmpdir
-  // call failed, in which case the one above fails too and returns first.
+  // Handing it over is sound when either caller-owned root is wired: the
+  // standard registry's `job_dir` has a task-group teardown, and a scratch lab
+  // has its own lifecycle. A non-standard caller that wires neither root has no
+  // owner, so its fallback directory is reclaimed by the job at terminal status.
   let mut job_owns_dir = false
   async fn cleanup() -> Unit {
     if job_owns_dir {
@@ -388,7 +404,7 @@ async fn execute(
     // no wildcard, and "any program" has no spelling in `process.allow` short
     // of enumerating one — so "no policy" is both the honest description of
     // what was approved and the only one the runtime can express.
-    ..if input.target == "wasm" && !escalated {
+    ..if policy_active {
       ["--wasm-policy", policy_path]
     },
     ..if !input.warning {
@@ -464,67 +480,6 @@ async fn execute(
     Some(command) => (command.program(), command.args())
     None => ("moon", moon_argv)
   }
-  if background && bg_runtime is Some(runtime) {
-    // Compile in the FOREGROUND first. A detached run would otherwise report
-    // a syntax or type error only through job_output, and with the throwaway
-    // temp path instead of `source:LINE:COL` — the two things that make a
-    // compile error readable. `--build-only` is the single-file equivalent of
-    // a check: `moon check`/`moon build` do not accept a `.mbtx` script (the
-    // first reports "no work to do", the second demands a Moon project).
-    // TODO(upstream): teach `moon check` to accept a `.mbtx` script, and use
-    // it here — building is more work than this preflight needs.
-    let build_argv = [..argv]
-    build_argv.push("--build-only")
-    let build_log = "\{dir}/build.log"
-    @fs.write_file(build_log, "", create_mode=CreateOrTruncate)
-    // Bounded like every other run here: a first build downloads and compiles
-    // dependencies, and a wedged fetch would otherwise hold the turn open —
-    // exactly what asking for a background job was meant to avoid.
-    let build_exit = @async.with_timeout_opt(run_timeout_ms, () => {
-      @process.run(
-        prog,
-        build_argv,
-        cwd=run_cwd.unwrap_or("."),
-        inherit_env=true,
-        stdin=@process.redirect_from_file(empty_stdin),
-        stdout=@process.redirect_to_file(build_log, append=true),
-        stderr=@process.redirect_to_file(build_log, append=true),
-        no_console_window=true,
-      )
-    })
-    guard build_exit is Some(build_exit) else {
-      let text = rewrite_temp_paths(read_capped(build_log), [real, dir])
-      return @agent_tool.respond(
-        "mbtx: the build did not finish within \{run_timeout_ms / 1000}s, so no background job was started.\n\{text}",
-        is_error=true,
-        brief="mbtx (build timeout)",
-      )
-    }
-    if build_exit != 0 {
-      let text = rewrite_temp_paths(read_capped(build_log), [real, dir])
-      return @agent_tool.respond(
-        "[mbtx: the program did not compile, so no background job was started]\n\{text}",
-        is_error=true,
-        brief="mbtx (build failed)",
-      )
-    }
-    let id = runtime.start(
-      program=prog,
-      args=argv,
-      command="mbtx: \{@agent_tool.brief_line(input.source, limit=64)}",
-      cwd?=run_cwd,
-      sandboxed_command?,
-      // Same EOF-on-stdin contract as a foreground run: a detached snippet
-      // must not inherit the engine's fd 0, which under `serve` carries the
-      // JSONL commands.
-      stdin=@process.redirect_from_file(empty_stdin),
-    )
-    job_owns_dir = true
-    return @agent_tool.respond(
-      "started background job \{id} (the program compiled). Read its output with job_output (job_id=\"\{id}\") and stop it with job_stop (job_id=\"\{id}\").",
-      brief="mbtx → bg \{id}",
-    )
-  }
   // With a job runtime wired the foreground run happens ON it, so the
   // deadline can DETACH the still-running program as a background job rather
   // than killing it: a long `moon test` that outlives the bound is then still
@@ -550,19 +505,35 @@ async fn execute(
     // code below would be invented. The exit is what this waits for either way,
     // so asking for the early wake only put the rest of the wait outside the
     // deadline. Expiry needs nothing special: it detaches like any other long run.
-    let finished = @async.with_timeout_opt(run_timeout_ms, () => exec.wait())
+    let finished = @async.with_timeout_opt(auto_background_after_ms, () => {
+      exec.wait()
+    })
     let saw_binary = exec.had_invalid_utf8()
     if finished is None {
       let _ = exec.background()
+      let terminal_cleanup : (async () -> Unit)? = if handoff_dir_has_owner {
+        None
+      } else {
+        Some(() => {
+          @async.protect_from_cancel(() => {
+            @fs.rmdir(dir, recursive=true) catch {
+              _ => ()
+            }
+          })
+        })
+      }
       let id = runtime.adopt(
         exec,
         command="mbtx: \{@agent_tool.brief_line(input.source, limit=64)}",
         cwd?=run_cwd,
         sandboxed_command?,
+        output_rewrites=temp_path_rewrites([real, dir]),
+        moonrun_policy_active=policy_active,
+        on_terminal?=terminal_cleanup,
       )
       job_owns_dir = true
       return @agent_tool.respond(
-        "mbtx: still running after \{run_timeout_ms / 1000}s, so it moved to the background as job \{id} (nothing was lost). Read its output with job_output (job_id=\"\{id}\") and stop it with job_stop (job_id=\"\{id}\").",
+        "mbtx: still running after \{duration_label(auto_background_after_ms)}, so it moved to the background as job \{id} (nothing was lost). Read its output with job_output (job_id=\"\{id}\") and stop it with job_stop (job_id=\"\{id}\").",
         brief="mbtx → bg \{id}",
       )
     }
@@ -581,7 +552,7 @@ async fn execute(
       denial_scan_source,
       raw,
       escalation=approval is Some(_),
-      escalated~,
+      policy_active~,
     )
     exec.discard()
     let text = rewrite_temp_paths(raw, [real, dir])
@@ -593,7 +564,7 @@ async fn execute(
       text
     }
     let body = if output_limit_reached {
-      "\{body}\n[mbtx: output passed \{OutputCapBytes} bytes, so the program was STOPPED and this is only what it printed first. Redirect bulky output with `stdout=ToFile(path)` and read the file instead.]"
+      "\{body}\n[mbtx: output passed the fixed \{OutputCapBytes}-byte inline limit, so the program was STOPPED and this is only what it printed first. Retrying the same call will hit the same limit. Redirect bulky child output with `stdout=ToFile(path)` where `path` is under `@fs.tmpdir()`, then have that same snippet read the file and print only the needed excerpt before it exits.]"
     } else {
       body
     }
@@ -615,7 +586,7 @@ async fn execute(
       brief="mbtx (exit=\{exit_code})",
     )
   }
-  let result = @async.with_timeout_opt(run_timeout_ms, () => {
+  let result = @async.with_timeout_opt(foreground_timeout_ms, () => {
     let exit_code = @process.run(
       prog,
       argv,
@@ -638,7 +609,7 @@ async fn execute(
     Some(log),
     "",
     escalation=approval is Some(_),
-    escalated~,
+    policy_active~,
   )
   let action = match result {
     Some((exit_code, raw)) => {
@@ -672,7 +643,7 @@ async fn execute(
       // instead of discarding it behind a generic timeout message. The status
       // line stays first so it survives the outer result clamp.
       let partial = rewrite_temp_paths(read_capped(log), [real, dir])
-      let head = "mbtx: timed out after \{run_timeout_ms / 1000}s and was cancelled — the program did not finish (an infinite loop, or a build that never completed)."
+      let head = "mbtx: timed out after \{duration_label(foreground_timeout_ms)} and was cancelled — the program did not finish (an infinite loop, or a build that never completed)."
       let body = if partial.is_blank() {
         head
       } else {
@@ -708,7 +679,7 @@ async fn refusal_guidance(
   log_path : String?,
   head : String,
   escalation~ : Bool,
-  escalated~ : Bool,
+  policy_active~ : Bool,
 ) -> String? {
   async fn shows(reports : (String) -> Bool) -> Bool {
     match log_path {
@@ -717,12 +688,10 @@ async fn refusal_guidance(
     }
   }
 
-  // An escalated run was given no policy, so nothing it prints can be this
-  // tool's policy refusing something. The spawn marker is only the guest's own
-  // `EPERM` text, which an unsandboxed child can produce for its own reasons —
-  // scanning for it here would report a successful run as an error and tell
-  // the model to ask for the escalation it was already granted.
-  if !escalated && shows(@sandbox.output_reports_policy_refusal) {
+  // A non-wasm or escalated run was given no moonrun policy, so nothing it
+  // prints can be that policy refusing something. The marker is ordinary guest
+  // text in that case; classifying it would turn a successful run into an error.
+  if policy_active && shows(@sandbox.output_reports_policy_refusal) {
     // The escalating variant only where a channel exists AND this is a
     // foreground report: its wording assumes nothing ran, which is true here
     // and false of `job_output`, whose job worked before it was refused.
@@ -746,18 +715,27 @@ async fn refusal_guidance(
 /// both `/` and `\` separators — moon reports the canonical native path (with
 /// backslashes on Windows), so `source:LINE:COL` shows on every host rather than
 /// a random `_build` path leaking through.
-fn rewrite_temp_paths(text : String, bases : Array[String]) -> String {
-  let mut out = text
+fn temp_path_rewrites(bases : Array[String]) -> Array[(String, String)] {
+  let rewrites : Array[(String, String)] = []
   for base in bases {
     for sep in ["/", "\\"] {
       // `.mbtx` first: replacing `snippet.mbt` before it would leave a stray
       // `x` (`sourcex`). `snippet.mbt` is the generated file at the top of the
       // target-dir; `_build/snippet.mbt` covers the older build layout.
-      out = out
-        .replace_all(old="\{base}\{sep}snippet.mbtx", new="source")
-        .replace_all(old="\{base}\{sep}_build\{sep}snippet.mbt", new="source")
-        .replace_all(old="\{base}\{sep}snippet.mbt", new="source")
+      rewrites.push(("\{base}\{sep}snippet.mbtx", "source"))
+      rewrites.push(("\{base}\{sep}_build\{sep}snippet.mbt", "source"))
+      rewrites.push(("\{base}\{sep}snippet.mbt", "source"))
     }
+  }
+  rewrites
+}
+
+///|
+fn rewrite_temp_paths(text : String, bases : Array[String]) -> String {
+  let mut out = text
+  for rewrite in temp_path_rewrites(bases) {
+    let (old, replacement) = rewrite
+    out = out.replace_all(old~, new=replacement)
   }
   out
 }
@@ -892,13 +870,10 @@ async fn read_capped(path : String) -> String {
 }
 
 ///|
-/// The `mbtx` argument schema. `background` adds `run_in_background`,
-/// which a definition without a job runtime must not advertise — the model
-/// would only get an error from a call it cannot execute. `escalation` adds
-/// `escalated` on the same rule: with no approval channel wired, every use of
-/// it would come back refused, and the cheapest way to not waste a turn on
-/// that is for the argument not to exist.
-fn schema(background~ : Bool, escalation~ : Bool) -> Json {
+/// The `mbtx` argument schema. `escalation` adds `escalated` only when an
+/// approval channel is wired; otherwise every use would come back refused, and
+/// the cheapest way not to waste a turn is for the argument not to exist.
+fn schema(escalation~ : Bool) -> Json {
   {
     "type": "object",
     "properties": Json(
@@ -932,22 +907,6 @@ fn schema(background~ : Bool, escalation~ : Bool) -> Json {
               ),
             },
           ),
-          ..if background {
-            [
-              (
-                "run_in_background",
-                Json({
-                  "type": "boolean",
-                  "description": (
-                    #|Run as a background job: returns a job id immediately and a completion
-                    #|notice arrives when it exits. Use for long-running work (full test
-                    #|suites, long builds, watchers) instead of blocking on the 300s
-                    #|foreground bound, which moves the run to a job when it expires.
-                  ),
-                }),
-              ),
-            ]
-          },
           ..if escalation {
             [
               (
@@ -988,14 +947,19 @@ fn schema(background~ : Bool, escalation~ : Bool) -> Json {
 /// The spawn list is prose about `spawnable_commands`, kept by hand so the
 /// groupings survive; adding an entry there means editing this text too.
 ///
-/// `background` is conditional because without a job runtime the tool must not
-/// advertise `run_in_background`: the model would only get an error.
-/// `escalation` is conditional for the same reason, and matters more: the
+/// `background` selects the execution-time contract the caller actually wired:
+/// automatic handoff with a job runtime, or a longer cancelling timeout without
+/// one. `escalation` is conditional too, and matters more: the
 /// refused-command paragraph above tells the model to say so rather than work
 /// around a refusal, and where escalation IS available that advice would be
 /// wrong — there is a sanctioned way to ask. The paragraph that says so must
 /// appear exactly where the way exists.
-fn description(background~ : Bool, escalation~ : Bool) -> String {
+fn description(
+  background~ : Bool,
+  escalation~ : Bool,
+  auto_background_after_ms~ : Int,
+  foreground_timeout_ms~ : Int,
+) -> String {
   // The one sentence here that depends on what this build can actually do.
   //
   // Without an approval channel a refusal really is the end of the road, and
@@ -1072,9 +1036,9 @@ fn description(background~ : Bool, escalation~ : Bool) -> String {
     #|  These network rules do not constrain an allowed child process.
     #|- Compiler warnings for the snippet are suppressed; pass `warning: "on"` to
     #|  see them.
-    #|- Bounded to 300s. For independent commands or probes, emit SEVERAL
-    #|  `mbtx` calls in the SAME assistant turn — they run and come back
-    #|  together, saving a model round-trip each.
+    #|- For independent commands or probes, emit SEVERAL `mbtx` calls in the SAME
+    #|  assistant turn — they run and come back together, saving a model round-trip
+    #|  each.
   // Three raw pieces joined at the seam, rather than one interpolating block:
   // the tail carries `\{@fs.tmpdir()}` inside a code sample, which a `$|` block
   // would try to evaluate.
@@ -1104,8 +1068,17 @@ fn description(background~ : Bool, escalation~ : Bool) -> String {
       $|the task needs, and the reason evident in the code itself.
     )
   }
+  let foreground_bound = duration_label(foreground_timeout_ms)
+  let handoff_bound = duration_label(auto_background_after_ms)
   if !background {
-    return base
+    return (
+      $|\{base}
+      $|
+      $|## Execution time
+      $|
+      $|This context has no background-job runtime. A run may stay in the foreground
+      $|for up to \{foreground_bound}; at that deadline it is cancelled and reported as a timeout.
+    )
   }
   // The blank `$|` line is the paragraph break: without it the section heading
   // runs onto the base text's last line and stops reading as a heading.
@@ -1114,12 +1087,11 @@ fn description(background~ : Bool, escalation~ : Bool) -> String {
     $|
     $|## Long-running work
     $|
-    $|For full test suites, long builds and watchers, set run_in_background=true: the
-    $|call returns a job id immediately and a notice arrives automatically when the job
-    $|finishes — so never block on time (no sleep loops, no polling); keep working and
-    $|act on the completion notice. Read a job's recent output with job_output and
-    $|cancel it with job_stop. A foreground run is bounded to 300s; at that deadline it
-    $|MOVES to a background job rather than dying, so nothing is lost either way —
-    $|asking for a job up front just skips the wait.
+    $|Every call stays inline for up to \{handoff_bound}. If it is still running, it AUTOMATICALLY
+    $|moves to a background job and returns the job id; no background flag or duration
+    $|guess is needed. A completion notice arrives when it finishes, so never wait with
+    $|sleep loops or repeated polling: keep working and act on the notice. Read recent
+    $|output with job_output (use one bounded wait_ms call only when the result is needed
+    $|now), and cancel it with job_stop.
   )
 }

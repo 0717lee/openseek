@@ -93,6 +93,54 @@ test "set_value keeps headless scroll while folding recomputes" {
 }
 
 ///|
+/// Desktop's watched-file refresh brackets the whole-value flush with this
+/// view-state contract. The expanded provider range stays expanded by absence
+/// from the memento, while its collapsed sibling is reapplied.
+test "save set_value restore preserves mixed folding state" {
+  let before =
+    #|class A {
+    #|  first()
+    #|}
+    #|class B {
+    #|  second()
+    #|}
+    #|tail
+  with_test_viewer(before, viewer => {
+    viewer.fold_top_level()
+    guard viewer.folding_controller() is Some(controller) &&
+      controller.folding_model is Some(folding_model) else {
+      fail("expected folding model")
+    }
+    guard folding_model.get_region_at_line(1) is Some(first) else {
+      fail("expected first top-level region")
+    }
+    folding_model.toggle_collapse_state([first])
+    guard folding_model.get_region_at_line(1) is Some(first_before) &&
+      folding_model.get_region_at_line(4) is Some(second_before) else {
+      fail("expected both top-level regions before refresh")
+    }
+    assert_false(first_before.is_collapsed())
+    assert_true(second_before.is_collapsed())
+
+    guard viewer.save_view_state() is Some(view_state) else {
+      fail("expected viewer state")
+    }
+    viewer.set_value(before + "\nrefreshed")
+    viewer.restore_view_state(Some(view_state))
+
+    guard controller.folding_model is Some(restored) else {
+      fail("expected restored folding model")
+    }
+    guard restored.get_region_at_line(1) is Some(first_after) &&
+      restored.get_region_at_line(4) is Some(second_after) else {
+      fail("expected both top-level regions after refresh")
+    }
+    assert_false(first_after.is_collapsed())
+    assert_true(second_after.is_collapsed())
+  })
+}
+
+///|
 test "set_value preserves the headless model slot without browser state" {
   with_test_viewer("one\ntwo", viewer => {
     guard viewer.model_slot.current is Some(before) else {

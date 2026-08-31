@@ -559,13 +559,18 @@ async test "a worker's snippet writes neither its own tree nor a sibling's" {
 }
 
 ///|
-/// Without a job runtime the tool cannot execute a background run, so neither
-/// the description nor the schema may advertise one — the model would only get
-/// an error. (The wired half of this contract is asserted in the `agent`
-/// package, which builds a registry with a real runtime.)
-test "a definition without a job runtime does not advertise background runs" {
+/// Without a job runtime the description names the longer cancelling timeout;
+/// the schema never asks the model to choose foreground versus background.
+test "a definition without a job runtime describes its hard timeout" {
   let definition = @mbtx.definition(workspace_root=".")
   assert_false(definition.description.contains("run_in_background"))
+  assert_true(definition.description.contains("no background-job runtime"))
+  assert_true(definition.description.contains("up to 300s"))
+  let injected = @mbtx.definition(
+    workspace_root=".",
+    foreground_timeout_ms=12_345,
+  )
+  assert_true(injected.description.contains("up to 12345ms"))
   let JsonSchema(schema) = definition.schema
   assert_false(schema.stringify().contains("run_in_background"))
 }
@@ -602,6 +607,18 @@ test "the schema advertises every decoded argument" {
     assert_true(names.contains(name))
   }
   assert_eq(required, (["source"] : Json))
+}
+
+///|
+/// The removed argument is rejected below JSON Schema enforcement, and its
+/// migration guidance must still read correctly through execute's shared
+/// "mbtx requires ..." decode-error wrapper.
+async test "the removed background field has grammatical migration guidance" {
+  let out = run_in(".", { "source": "fn main {  }", "run_in_background": true })
+  assert_true(out.is_error)
+  assert_true(out.content.contains("mbtx requires arguments without"))
+  assert_true(out.content.contains("field was removed"))
+  assert_true(out.content.contains("handoff is automatic"))
 }
 
 // The EDSL guidance the description carries — how a snippet is shaped, the
@@ -867,6 +884,19 @@ async test "refuses native FFI (extern can bind libc system)" {
 }
 
 ///|
+/// A compute-only backend has no moonrun policy. Text resembling its refusal
+/// marker is ordinary program output even in a runtime-less definition.
+async test "a runtime-less non-wasm run does not invent a policy refusal" {
+  let out = run_in(".", {
+    "source": "fn main { println(\"Sandbox policy blocked file write: example\") }",
+    "target": "js",
+  })
+  assert_false(out.is_error)
+  assert_true(out.content.contains("Sandbox policy blocked"))
+  assert_false(out.content.contains("mbtx sandbox:"))
+}
+
+///|
 async test "snippet stdin is an empty file (EOF), not the engine's inherited fd 0" {
   // A snippet that reads stdin must get immediate EOF, not block on (or steal
   // from) the parent's fd 0 — which under serve/TUI is the control channel.
@@ -891,6 +921,35 @@ async test "a non-zero exit shows the exit code in the content, not just the bri
   assert_true(out.is_error)
   assert_true(out.content.contains("before"))
   assert_true(out.content.contains("exited"))
+}
+
+///|
+/// The short handoff grace belongs only to a runtime-backed definition. A
+/// foreground-only subrun has no job owner, so it keeps its independent hard
+/// timeout instead of being cancelled at the handoff boundary.
+async test "a runtime-less run uses its foreground timeout, not the handoff grace" {
+  @vfs.with_tmpdir(prefix="mbtx-foreground-timeout-", ws => {
+    let definition = @mbtx.definition(
+      workspace_root=ws,
+      auto_background_after_ms=1,
+      foreground_timeout_ms=300_000,
+    )
+    let source =
+      #|import { "moonbitlang/async" }
+      #|
+      #|async fn main {
+      #|  @async.sleep(100)
+      #|  println("finished inline")
+      #|}
+    let action = match definition.execute {
+      Async(execute) => execute({ "source": source })
+      Sync(_) => fail("mbtx should be async")
+    }
+    guard action is Respond(output) else { fail("expected Respond") }
+    assert_false(output.is_error)
+    assert_true(output.content.contains("finished inline"))
+    assert_false(output.content.contains("moved to the background"))
+  })
 }
 
 ///|
@@ -919,9 +978,8 @@ async fn run_escalating(
 }
 
 ///|
-/// The argument exists only where something can answer it. This is the same
-/// rule `run_in_background` follows, and it is what keeps a headless run from
-/// spending a call on a field whose every use is refused.
+/// The argument exists only where something can answer it, keeping a headless
+/// run from spending a call on a field whose every use is refused.
 test "the escalated argument is offered only with an approval channel" {
   let plain = @mbtx.definition(workspace_root=".")
   let JsonSchema(plain_schema) = plain.schema
