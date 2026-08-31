@@ -20,10 +20,12 @@ diagnostics are rewritten to stable `source:LINE:COL` locations.
 With the agent's background runtime, every call waits inline for up to five
 seconds. A still-running compile or program is then adopted as the same
 background execution: the call returns its job id, completion is pushed later,
-and the snippet directory is reclaimed when the job becomes terminal. There is
-no foreground/background argument to choose. A standalone definition without a
-job runtime stays in the foreground for up to 300 seconds and is cancelled at
-that deadline.
+and its compiler inputs and build artifacts are reclaimed when the job becomes
+terminal. Files the snippet writes under its temporary result directory remain
+readable until session teardown, so paths printed in completion output stay
+valid. There is no foreground/background argument to choose. A standalone
+definition without a job runtime stays in the foreground for up to 300 seconds
+and is cancelled at that deadline.
 
 ## Arguments
 

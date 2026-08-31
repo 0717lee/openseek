@@ -287,10 +287,9 @@ async fn execute(
   let handoff_dir_has_owner = job_dir is Some(_) || scratch_dir is Some(_)
   // A directory that an automatic handoff may give to a job must outlive this
   // call, so it is numbered inside a caller-owned job dir or scratch lab when
-  // one exists. Such a job keeps the whole directory until teardown: its `tmp`
-  // subtree is the snippet's writable result area, and deleting it at terminal
-  // status would make paths in completion output unreadable before the model can
-  // act on them.
+  // one exists. Its `tmp` subtree is the snippet's writable result area and may
+  // contain paths named in completion output, so only the separate build subtree
+  // is reclaimed when a handed-off job becomes terminal.
   let dir = if job_dir is Some(scratch) {
     let dir = "\{scratch}/snippet-\{next_background.val}"
     next_background.val += 1
@@ -330,17 +329,17 @@ async fn execute(
         )
     }
   }
-  // Set once an automatically handed-off job takes over the directory (snippet,
-  // artifacts, and output log). `cleanup` runs on every exit path, so the flag
-  // decides whether reclaiming the directory is still ours.
+  // Set once an automatically handed-off job takes over resource cleanup.
+  // `cleanup` runs on every exit path, so the flag prevents it from racing the
+  // process after handoff.
   //
   // Handing it over is sound when either caller-owned root is wired: the
   // standard registry's `job_dir` has a task-group teardown, and a scratch lab
   // has its own lifecycle. A non-standard caller that wires neither root has no
   // owner, so its fallback directory is reclaimed by the job at terminal status.
-  let mut job_owns_dir = false
+  let mut job_owns_cleanup = false
   async fn cleanup() -> Unit {
-    if job_owns_dir {
+    if job_owns_cleanup {
       return
     }
     @async.protect_from_cancel(() => {
@@ -351,12 +350,23 @@ async fn execute(
   }
 
   defer cleanup()
+  // Keep disposable compiler inputs and artifacts apart from `tmp`, whose
+  // result files may need to remain readable after a background job exits.
+  let build_dir = "\{dir}/build"
+  @fs.mkdir(build_dir) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ =>
+      return @agent_tool.respond(
+        "mbtx: could not create a build directory for the snippet.",
+        is_error=true,
+      )
+  }
   @fs.write_file(
-    "\{dir}/snippet.mbtx",
+    "\{build_dir}/snippet.mbtx",
     input.source,
     create_mode=CreateOrTruncate,
   )
-  let log = "\{dir}/output.log"
+  let log = "\{build_dir}/output.log"
   // Pre-create the merged output file so both redirects open it; both append
   // so stdout and stderr interleave in write order.
   @fs.write_file(log, "", create_mode=CreateOrTruncate)
@@ -365,19 +375,20 @@ async fn execute(
   // snippet reading `@stdio.stdin` would otherwise consume the engine's
   // prompt/steer/cancel commands (or block until the timeout). An empty temp
   // file is portable (no `/dev/null`/`NUL` special-casing).
-  let empty_stdin = "\{dir}/stdin.empty"
+  let empty_stdin = "\{build_dir}/stdin.empty"
   @fs.write_file(empty_stdin, "", create_mode=CreateOrTruncate)
   // moon's diagnostics point at the copied source under the build dir; the
   // canonical path anchors the diagnostic path rewrite below.
-  let real = @fs.realpath(dir) catch { _ => dir }
+  let real = @fs.realpath(build_dir) catch { _ => build_dir }
   // The wasm backend is where moonrun's policy applies, so the policy file is
   // written for every run and passed alongside. `--wasm-policy` is silently
   // IGNORED on other backends, which is why `target` is not the model's choice
   // to make freely — see `decode`.
-  let policy_path = "\{dir}/policy.json"
+  let policy_path = "\{build_dir}/policy.json"
   // Scratch space for the snippet's own `@fs.tmpdir()`, kept beside the build
   // output rather than inside it so temp directories do not appear among moon's
-  // artifacts. It goes away with `dir` when the run is cleaned up.
+  // artifacts. After handoff its caller-owned container preserves these results;
+  // all foreground and standalone paths still remove the whole container.
   let snippet_tmp = "\{dir}/tmp"
   @fs.mkdir(snippet_tmp) catch {
     error if @async.is_being_cancelled() => raise error
@@ -393,11 +404,11 @@ async fn execute(
   @fs.write_file(policy_path, policy.stringify(), create_mode=CreateOrTruncate)
   let moon_argv = [
     "run",
-    "\{dir}/snippet.mbtx",
+    "\{build_dir}/snippet.mbtx",
     "--target",
     input.target,
     "--target-dir",
-    dir,
+    build_dir,
     // An approved escalation is exactly this: the policy file is still
     // written, and simply not passed. Widening the document instead was not
     // available — its `fs.write` roots are canonicalized existing paths with
@@ -420,14 +431,15 @@ async fn execute(
   // cannot be applied, every role runs with the policy as its only bound.
   // The prepared command carries what it needs to classify its own denials, so
   // one showing up in the program's output can be recognized and explained.
-  // The throwaway build dir is the writable subtree: if it falls INSIDE the
-  // workspace root (e.g. `workspace_root=/tmp`, where `@fs.tmpdir` lands
+  // The throwaway snippet container is the writable subtree: if it falls INSIDE
+  // the workspace root (e.g. `workspace_root=/tmp`, where `@fs.tmpdir` lands
   // under it) the shared deny would otherwise block moon's own generated
   // `snippet.mbt`.
   // The writable subtree has to contain the snippet's own build output. With a
   // lab wired the snippet builds inside it, so the lab covers both; otherwise
-  // the build dir is the subtree. Choosing by where `dir` actually sits keeps
-  // the two from disagreeing when a caller passes both a job dir and a lab.
+  // the snippet container covers `build` and `tmp`. Choosing by where `dir`
+  // actually sits keeps the two from disagreeing when a caller passes both a
+  // job dir and a lab.
   let writable_subtree = match scratch_dir {
     Some(lab) if dir.has_prefix(lab) => lab
     _ => dir
@@ -511,15 +523,19 @@ async fn execute(
     let saw_binary = exec.had_invalid_utf8()
     if finished is None {
       let _ = exec.background()
-      let terminal_cleanup : (async () -> Unit)? = if handoff_dir_has_owner {
-        None
+      // A session- or lab-owned outer directory keeps only durable `tmp`
+      // results. A standalone runtime has no later owner, so it reclaims the
+      // whole fallback directory once the process is terminal.
+      let terminal_cleanup_path = if handoff_dir_has_owner {
+        build_dir
       } else {
-        Some(() => {
-          @async.protect_from_cancel(() => {
-            @fs.rmdir(dir, recursive=true) catch {
-              _ => ()
-            }
-          })
+        dir
+      }
+      let terminal_cleanup : async () -> Unit = () => {
+        @async.protect_from_cancel(() => {
+          @fs.rmdir(terminal_cleanup_path, recursive=true) catch {
+            _ => ()
+          }
         })
       }
       let id = runtime.adopt(
@@ -527,11 +543,11 @@ async fn execute(
         command="mbtx: \{@agent_tool.brief_line(input.source, limit=64)}",
         cwd?=run_cwd,
         sandboxed_command?,
-        output_rewrites=temp_path_rewrites([real, dir]),
+        output_rewrites=temp_path_rewrites([real, build_dir]),
         moonrun_policy_active=policy_active,
-        on_terminal?=terminal_cleanup,
+        on_terminal=terminal_cleanup,
       )
-      job_owns_dir = true
+      job_owns_cleanup = true
       return @agent_tool.respond(
         "mbtx: still running after \{duration_label(auto_background_after_ms)}, so it moved to the background as job \{id} (nothing was lost). Read its output with job_output (job_id=\"\{id}\") and stop it with job_stop (job_id=\"\{id}\").",
         brief="mbtx → bg \{id}",
@@ -555,7 +571,7 @@ async fn execute(
       policy_active~,
     )
     exec.discard()
-    let text = rewrite_temp_paths(raw, [real, dir])
+    let text = rewrite_temp_paths(raw, [real, build_dir])
     let body = if text.is_blank() {
       "mbtx: program exited \{exit_code} with no output"
     } else if exit_code != 0 {
@@ -615,7 +631,7 @@ async fn execute(
     Some((exit_code, raw)) => {
       // Rewrite the throwaway temp path to `source` so the model reads
       // `source:LINE:COL` about its own input, not a random temp path.
-      let text = rewrite_temp_paths(raw, [real, dir])
+      let text = rewrite_temp_paths(raw, [real, build_dir])
       // PREPEND the exit status so it survives the agent loop's outer 60k
       // result clamp (which cuts the tail); the output cap is below 60k so
       // both the status line and the body are retained.
@@ -642,7 +658,7 @@ async fn execute(
       // still on disk (cleanup runs below), so surface the captured prefix
       // instead of discarding it behind a generic timeout message. The status
       // line stays first so it survives the outer result clamp.
-      let partial = rewrite_temp_paths(read_capped(log), [real, dir])
+      let partial = rewrite_temp_paths(read_capped(log), [real, build_dir])
       let head = "mbtx: timed out after \{duration_label(foreground_timeout_ms)} and was cancelled — the program did not finish (an infinite loop, or a build that never completed)."
       let body = if partial.is_blank() {
         head
