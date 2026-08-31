@@ -14,19 +14,25 @@ priv enum SearchRequest {
 }
 
 ///|
-fn SearchRequest::root_string(self : SearchRequest) -> String {
+struct SearchRequestIdentity {
+  root : String
+  generation : Int
+  kind : String
+} derive(Eq)
+
+///|
+fn SearchRequest::identity(self : SearchRequest) -> SearchRequestIdentity {
   match self {
-    Text(payload) => payload.root
-    Semantic(payload) => payload.root
+    Text(payload) =>
+      { root: payload.root, generation: payload.generation, kind: "text", }
+    Semantic(payload) =>
+      { root: payload.root, generation: payload.generation, kind: "semantic", }
   }
 }
 
 ///|
 fn SearchRequest::generation(self : SearchRequest) -> Int {
-  match self {
-    Text(payload) => payload.generation
-    Semantic(payload) => payload.generation
-  }
+  self.identity().generation
 }
 
 ///|
@@ -37,12 +43,12 @@ priv enum LoadedReply {
 }
 
 ///|
-fn cancel_search(
+fn SearchRequest::cancel(
+  self : SearchRequest,
   owner : @interop.ConversationKey,
-  request : SearchRequest,
 ) -> Unit {
   @js.async_run(() => {
-    match request {
+    match self {
       Text(payload) =>
         ignore(
           @interop.bridge_request(
@@ -85,7 +91,8 @@ fn search_request_loader(
   let mut emit = emit
   let mut active = true
   let mut settled = false
-  let request_root = request.root_string()
+  let identity = request.identity()
+  let request_root = identity.root
   let request_generation = request.generation()
   let timer = @dom.window().set_timeout(
     () => {
@@ -170,7 +177,7 @@ fn search_request_loader(
       active = false
       @dom.window().clear_timeout(timer)
       if !settled {
-        cancel_search(owner, request)
+        request.cancel(owner)
       }
     },
     update_tagger: payload => {
@@ -208,9 +215,10 @@ pub fn State::subscription(
       page.semantic_request_payload(input).map(payload => Semantic(payload))
   }
   guard request is Some(request) else { return @sub.none }
-  let request_root = request.root_string()
+  let identity = request.identity()
+  let request_root = identity.root
   @sub.custom_sub(
-    "grep-search:\{input.owner.channel.uri_authority()}:\{input.owner.session}:\{request_root}:\{request.generation()}:\{match page.mode { Text => "text"; Semantic => "semantic" }}",
+    "grep-search:\{input.owner.channel.uri_authority()}:\{input.owner.session}:\{request_root}:\{identity.generation}:\{identity.kind}",
     Local,
     SearchRequestSub::SearchRequest(input.owner, request, page.delay_ms, emit),
     @sub.SubLoader(search_request_loader),
