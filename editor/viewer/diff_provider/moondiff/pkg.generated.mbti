@@ -5,12 +5,11 @@ import {
   "moonbitlang/core/debug",
   "moonbitlang/editor/base/common",
   "moonbitlang/editor/viewer/common/diff",
+  "moonbitlang/editor/viewer/common/model",
 }
 
 // Values
 pub fn compute_sectioned_semantic_review_plan(String, String, MoonDiffMode, old_name? : String, new_name? : String, ignore_comments? : Bool, ignore_tests? : Bool) -> SectionedSemanticReviewPlan?
-
-pub fn fragment_document_diff(@moonbit-community/moondiff/model.HunkDocument, String, String) -> @diff.DocumentDiff?
 
 // Errors
 

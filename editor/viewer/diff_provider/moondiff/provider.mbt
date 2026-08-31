@@ -370,7 +370,7 @@ fn adapt_fragment_document(
 ///|
 /// Convert exactly one MoonDiff fragment into the common DiffEditor contract.
 /// No top-level ranges are rebased, sorted, padded, or flattened here.
-pub fn fragment_document_diff(
+fn fragment_document_diff(
   document : @mbtdiff.HunkDocument,
   original_source : String,
   modified_source : String,

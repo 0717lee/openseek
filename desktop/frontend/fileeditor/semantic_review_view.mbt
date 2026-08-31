@@ -37,7 +37,7 @@ fn ReviewDiffMode::semantic_mode(
 /// Extract the visible semantic comparison from either a working-tree review
 /// or Git history. Core, source mode, non-MoonBit files, and unavailable text
 /// deliberately produce no input.
-pub fn semantic_review_input(state : State, ctx : Ctx) -> SemanticReviewInput? {
+fn semantic_review_input(state : State, ctx : Ctx) -> SemanticReviewInput? {
   guard state.review_diff_mode.semantic_mode() is Some(mode) else {
     return None
   }
@@ -886,7 +886,7 @@ fn clear_semantic_review_editors() -> Unit {
 ///|
 /// Reconcile section widgets after Rabbita has committed their keyed hosts.
 /// Unchanged sections retain their editor models, selection, and scroll state.
-pub fn sync_semantic_review_editors(state : State) -> @cmd.Cmd {
+fn sync_semantic_review_editors(state : State) -> @cmd.Cmd {
   @cmd.custom_cmd(
     _scheduler => {
       guard state.semantic_review_input is Some(input) else {

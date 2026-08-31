@@ -56,15 +56,11 @@ pub fn request_viewer_remeasure() -> @cmd.Cmd
 
 pub fn resize_handle_view() -> @html.Html
 
-pub fn semantic_review_input(State, Ctx) -> SemanticReviewInput?
-
 pub fn semantic_review_view(@cmd.Emit[Msg], State) -> @html.Html
 
 pub fn subscriptions(State, Ctx, @cmd.Emit[Msg]) -> @sub.Sub
 
 pub fn sync(@cmd.Emit[Msg], State, Ctx) -> (State, @cmd.Cmd)
-
-pub fn sync_semantic_review_editors(State) -> @cmd.Cmd
 
 pub fn update(@cmd.Emit[Msg], Msg, State, Ctx) -> (@cmd.Cmd, State)
 
