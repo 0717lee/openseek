@@ -1881,6 +1881,7 @@ fn app_shell_class(
   sidebar_open : Bool,
   is_desktop : Bool,
   platform : String,
+  is_windows? : Bool = @common.platform_is_win32(),
 ) -> String {
   let classes : Array[String] = ["app"]
   if !sidebar_open {
@@ -1889,7 +1890,7 @@ fn app_shell_class(
   if is_desktop && browser_platform_is_apple(platform) {
     classes.push("native-titlebar-overlay")
     classes.push("native-apple-titlebar")
-  } else if is_desktop && @common.is_windows {
+  } else if is_desktop && is_windows {
     classes.push("native-titlebar-overlay")
     classes.push("native-windows-titlebar")
   }

@@ -10,8 +10,11 @@ const WindowTitlebarSelector = ".sidebar-header, .topbar, .editor-tabsbar, .wind
 const WindowTitlebarExcludedSelector = "button, a, input, textarea, select, [role=button], [contenteditable=true], .editor-tab, .dock-menu"
 
 ///|
-fn window_titlebar_platform_supports_overlay(platform : String) -> Bool {
-  browser_platform_is_apple(platform) || @common.is_windows
+fn window_titlebar_platform_supports_overlay(
+  platform : String,
+  is_windows? : Bool = @common.platform_is_win32(),
+) -> Bool {
+  browser_platform_is_apple(platform) || is_windows
 }
 
 ///|
@@ -24,10 +27,11 @@ fn window_titlebar_drag_strip_visible(
   page_without_topbar : Bool,
   is_desktop : Bool,
   platform : String,
+  is_windows? : Bool = @common.platform_is_win32(),
 ) -> Bool {
   page_without_topbar &&
   is_desktop &&
-  window_titlebar_platform_supports_overlay(platform)
+  window_titlebar_platform_supports_overlay(platform, is_windows~)
 }
 
 ///|
