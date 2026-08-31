@@ -1409,6 +1409,7 @@ fn apply_diagnostics(
         uri,
         DiagnosticsProjection(diagnostics).to_viewer(),
       )
+      refresh_semantic_modified_diagnostics(uri)
     }
   })
 }

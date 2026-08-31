@@ -46,11 +46,16 @@ fn model_uri_path(uri : @common.Uri) -> @common.Uri? {
 
 ///|
 /// Desktop language features are revision-sensitive today: host operations
-/// read the live checkout named by an `openseek` URI. Restricting provider
-/// selection at the registry boundary keeps an original-revision diff model
-/// from showing actions that could only resolve against the working tree.
-fn live_moonbit_model_selector() -> @language.LanguageSelector {
-  LanguageFilter(LanguageFilter(language="moonbit", scheme=@resource.Scheme))
+/// read the live checkout named by an `openseek` URI. Token/Tree's Modified
+/// fragments opt in through their distinct scheme and an explicit coordinate
+/// projection; Original and historical schemes remain excluded.
+fn moon_ide_model_selector() -> @language.LanguageSelector {
+  LanguageSelectorList([
+    LanguageFilter(LanguageFilter(language="moonbit", scheme=@resource.Scheme)),
+    LanguageFilter(
+      LanguageFilter(language="moonbit", scheme=SemanticReviewModifiedScheme),
+    ),
+  ])
 }
 
 ///|
@@ -66,25 +71,23 @@ impl @language.HoverProvider for LspHoverProvider with fn provide_hover(
   // v1 covers MoonBit only; other languages have no tooling behind the op.
   guard model.language_id == "moonbit" else { return None }
   guard !token.is_cancellation_requested() else { return None }
-  // The provider is registry-global, so use the document route recorded when
-  // Desktop placed this exact model in the Viewer.
-  guard model_uri_path(model.uri) is Some(absolute) &&
-    viewer_state.absolute == Some(absolute) &&
-    viewer_state.navigation is Some(context) &&
-    viewer_state.relative is Some(path) else {
+  // The provider is registry-global, so resolve either the live full model or
+  // a currently mounted semantic Modified projection before addressing the
+  // host checkout.
+  guard moon_ide_model_projection(model) is Some(projection) else {
     return None
   }
   let reply = request_hover(
-    owner=context.owner,
-    root=context.root,
-    path~,
+    owner=projection.context.owner,
+    root=projection.context.root,
+    path=projection.path,
     // The viewer's Position is 1-based; the host op speaks 0-based LSP coords.
-    line=position.line_number - 1,
+    line=projection.source_line_number(position.line_number) - 1,
     character=position.column - 1,
   ) catch {
     _ => return None
   }
-  HoverProjection::{ reply, model, }.to_viewer()
+  HoverProjection::{ reply, model, line_offset: projection.line_offset, }.to_viewer()
 }
 
 ///|
@@ -92,7 +95,7 @@ impl @language.HoverProvider for LspHoverProvider with fn provide_hover(
 fn register_hover_provider() -> Unit {
   let provider = LspHoverProvider::{ }
   @languages.languages.register_hover_provider(
-    live_moonbit_model_selector(),
+    moon_ide_model_selector(),
     provider,
   )
   |> ignore
@@ -123,6 +126,7 @@ async fn request_hover(
 priv struct HoverProjection {
   reply : @protocol.LspHoverReply
   model : @model.TextModel
+  line_offset : Int
 }
 
 ///|
@@ -149,11 +153,11 @@ fn HoverProjection::range(self : HoverProjection) -> @common.Range {
   // The reply carries 0-based LSP positions; shift to the viewer's 1-based
   // line/column, then round-trip through offsets so the range stays clamped.
   let start = snapshot.get_offset_at(
-    self.reply.start_line + 1,
+    self.reply.start_line + 1 - self.line_offset,
     self.reply.start_character + 1,
   )
   let end = snapshot.get_offset_at(
-    self.reply.end_line + 1,
+    self.reply.end_line + 1 - self.line_offset,
     self.reply.end_character + 1,
   )
   snapshot.range_of(@common.OffsetRange::from_to(start, end))
@@ -308,7 +312,7 @@ test "foreign uris do not parse as model paths or channels" {
 }
 
 ///|
-test "live language selector excludes an original revision model" {
+test "IDE language selector includes semantic Modified but excludes revisions" {
   let live = @model.TextModel(
     @common.Uri::parse("openseek://local/work/main.mbt"),
     "main.mbt",
@@ -325,6 +329,56 @@ test "live language selector excludes an original revision model" {
     "head",
     "fn main {}",
   )
-  assert_true(live_moonbit_model_selector().score(live) > 0)
-  assert_eq(live_moonbit_model_selector().score(original), 0)
+  let semantic_modified = @model.TextModel(
+    @common.Uri::parse("\{SemanticReviewModifiedScheme}:/section-1.mbt"),
+    "main.mbt",
+    "moonbit",
+    1,
+    "semantic-new",
+    "fn main {}",
+  )
+  let semantic_original = @model.TextModel(
+    @common.Uri::parse("\{SemanticReviewOriginalScheme}:/section-1.mbt"),
+    "main.mbt",
+    "moonbit",
+    1,
+    "semantic-old",
+    "fn main {}",
+  )
+  defer live.dispose()
+  defer original.dispose()
+  defer semantic_modified.dispose()
+  defer semantic_original.dispose()
+  assert_true(moon_ide_model_selector().score(live) > 0)
+  assert_true(moon_ide_model_selector().score(semantic_modified) > 0)
+  assert_eq(moon_ide_model_selector().score(original), 0)
+  assert_eq(moon_ide_model_selector().score(semantic_original), 0)
+}
+
+///|
+test "semantic hover response range projects back to fragment coordinates" {
+  let model = @model.TextModel(
+    @common.Uri::parse("\{SemanticReviewModifiedScheme}:/section-2.mbt"),
+    "main.mbt",
+    "moonbit",
+    1,
+    "semantic-new",
+    "fn value() -> Int {\n  2\n}",
+  )
+  defer model.dispose()
+  let projected = HoverProjection::{
+    reply: {
+      value: "Int",
+      markdown: false,
+      has_range: true,
+      start_line: 30,
+      start_character: 2,
+      end_line: 30,
+      end_character: 3,
+    },
+    model,
+    line_offset: 29,
+  }.to_viewer()
+  guard projected is Some(hover) else { fail("expected projected hover") }
+  assert_eq(hover.range, @common.Range(2, 3, 2, 4))
 }

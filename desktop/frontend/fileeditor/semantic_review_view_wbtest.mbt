@@ -16,6 +16,7 @@ fn semantic_test_input(
     mode,
     ignore_comments: true,
     ignore_tests: true,
+    live_modified: None,
   }
 }
 
@@ -227,10 +228,67 @@ test "semantic input follows active MoonBit review and ignores layout" {
   assert_eq(input.old_source, "fn value() { 1 }")
   assert_eq(input.new_source, "fn value() { 2 }")
   assert_true(input.mode is @moon_diff_provider.Token)
+  assert_true(
+    input.live_modified is Some({ resource, path: live_path, }) &&
+    resource.path == "/work/src/main.mbt" &&
+    live_path == path,
+  )
   assert_eq(
     semantic_review_input({ ..state, review_diff_mode: ReviewDiffCore, }, ctx),
     None,
   )
+}
+
+///|
+test "semantic model identity enables IDE only on Modified" {
+  guard semantic_model_uri(SemanticReviewOriginal, "section-3")
+    is Some(original) &&
+    semantic_model_uri(SemanticReviewModified, "section-3") is Some(modified) else {
+    fail("expected semantic model URIs")
+  }
+  assert_eq(original.scheme, SemanticReviewOriginalScheme)
+  assert_eq(modified.scheme, SemanticReviewModifiedScheme)
+  assert_eq(original.path, "/section-3.mbt")
+  assert_eq(modified.path, "/section-3.mbt")
+}
+
+///|
+test "semantic diagnostics retain only and relocate the section overlap" {
+  let model = @model.TextModel(
+    @common.Uri::parse("\{SemanticReviewModifiedScheme}:/section-4.mbt"),
+    "main.mbt",
+    "moonbit",
+    1,
+    "semantic-new",
+    "fn value() -> Int {\n  2\n}",
+  )
+  defer model.dispose()
+  let diagnostics : Array[@language.Diagnostic] = [
+    {
+      range: @common.Range(2, 1, 2, 4),
+      severity: Error,
+      message: "outside",
+      tags: None,
+    },
+    {
+      range: @common.Range(30, 4, 30, 9),
+      severity: Warning,
+      message: "inside",
+      tags: None,
+    },
+    {
+      range: @common.Range(28, 8, 32, 8),
+      severity: Info,
+      message: "crossing",
+      tags: None,
+    },
+  ]
+  let projected = project_semantic_modified_diagnostics(diagnostics, model, 29)
+  assert_eq(projected.length(), 2)
+  assert_eq(projected[0].message, "inside")
+  assert_eq(projected[0].range, @common.Range(1, 4, 1, 9))
+  assert_eq(projected[1].message, "crossing")
+  assert_eq(projected[1].range, @common.Range(1, 1, 3, 2))
 }
 
 ///|

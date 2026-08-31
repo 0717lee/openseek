@@ -70,6 +70,51 @@ fn navigation_context_for_file(
 }
 
 ///|
+/// One Viewer model projected back onto the live checkout document MoonIDE
+/// understands. Full-file models have a zero offset; Token/Tree Modified
+/// fragments carry the section's zero-based line displacement.
+priv struct MoonIdeModelProjection {
+  context : NavigationContext
+  path : @pathx.Relative
+  line_offset : Int
+}
+
+///|
+fn MoonIdeModelProjection::source_line_number(
+  self : MoonIdeModelProjection,
+  model_line_number : Int,
+) -> Int {
+  model_line_number + self.line_offset
+}
+
+///|
+/// Resolve IDE ownership without ever treating an Original or historical
+/// revision as the current checkout. The semantic branch additionally proves
+/// that the live resource still belongs to the active navigation context, so
+/// a stale fragment cannot address a replacement worktree.
+fn moon_ide_model_projection(
+  model : @model.TextModel,
+) -> MoonIdeModelProjection? {
+  guard viewer_state.navigation is Some(context) else { return None }
+  match model_uri_path(model.uri) {
+    Some(absolute) => {
+      guard viewer_state.absolute == Some(absolute) &&
+        context.relative_path(absolute) is Some(path) else {
+        return None
+      }
+      Some({ context, path, line_offset: 0, })
+    }
+    None => {
+      guard semantic_modified_model_projection(model) is Some(semantic) &&
+        context.relative_path(semantic.resource) == Some(semantic.path) else {
+        return None
+      }
+      Some({ context, path: semantic.path, line_offset: semantic.line_offset, })
+    }
+  }
+}
+
+///|
 /// One implementation serves both editor provider traits. The model URI names
 /// the absolute file and host; `NavigationContext` supplies its editor root.
 priv struct MoonIdeNavigationProvider {
@@ -89,25 +134,21 @@ impl @language.DefinitionProvider for MoonIdeNavigationProvider with fn provide_
   if token.is_cancellation_requested() || model.language_id != "moonbit" {
     return []
   }
-  guard viewer_state.navigation is Some(context) &&
-    model_uri_path(model.uri) is Some(absolute) &&
-    context.relative_path(absolute) is Some(path) else {
-    return []
-  }
+  guard moon_ide_model_projection(model) is Some(projection) else { return [] }
   let locations = request_moon_ide_locations(
-    context.owner.channel,
+    projection.context.owner.channel,
     @commands.moonide_definition,
     {
-      session: context.owner.session,
-      root: context.root.path,
-      path: path.0,
-      line: position.line_number,
+      session: projection.context.owner.session,
+      root: projection.context.root.path,
+      path: projection.path.0,
+      line: projection.source_line_number(position.line_number),
       column: position.column,
     },
   ) catch {
     error => {
       (self.on_error)(
-        context.owner,
+        projection.context.owner,
         "Go to definition failed: \{@interop.bridge_error_text(error)}",
       )
       return []
@@ -130,25 +171,21 @@ impl @language.ReferencesProvider for MoonIdeNavigationProvider with fn provide_
   if token.is_cancellation_requested() || model.language_id != "moonbit" {
     return []
   }
-  guard viewer_state.navigation is Some(context) &&
-    model_uri_path(model.uri) is Some(absolute) &&
-    context.relative_path(absolute) is Some(path) else {
-    return []
-  }
+  guard moon_ide_model_projection(model) is Some(projection) else { return [] }
   let locations = request_moon_ide_locations(
-    context.owner.channel,
+    projection.context.owner.channel,
     @commands.moonide_references,
     {
-      session: context.owner.session,
-      root: context.root.path,
-      path: path.0,
-      line: position.line_number,
+      session: projection.context.owner.session,
+      root: projection.context.root.path,
+      path: projection.path.0,
+      line: projection.source_line_number(position.line_number),
       column: position.column,
     },
   ) catch {
     error => {
       (self.on_error)(
-        context.owner,
+        projection.context.owner,
         "Find references failed: \{@interop.bridge_error_text(error)}",
       )
       return []
@@ -171,11 +208,11 @@ fn register_moon_ide_navigation_providers(
   let provider = MoonIdeNavigationProvider::{ on_error, }
   [
     @languages.languages.register_definition_provider(
-      live_moonbit_model_selector(),
+      moon_ide_model_selector(),
       provider,
     ),
     @languages.languages.register_references_provider(
-      live_moonbit_model_selector(),
+      moon_ide_model_selector(),
       provider,
     ),
   ]
@@ -343,6 +380,21 @@ test "navigation root follows resource and workspace-relative paths" {
     navigation_root_from_file(outside, Relative("lib/main.mbt")) is None,
   )
   assert_true(context.relative_path(outside) is None)
+}
+
+///|
+test "semantic navigation projects fragment-local lines onto the source" {
+  let context : NavigationContext = {
+    owner: { channel: @interop.ChannelId::Local, session: "test", },
+    root: @common.Uri::parse("openseek://local/work"),
+  }
+  let projection : MoonIdeModelProjection = {
+    context,
+    path: Relative("src/main.mbt"),
+    line_offset: 29,
+  }
+  assert_eq(projection.source_line_number(1), 30)
+  assert_eq(projection.source_line_number(3), 32)
 }
 
 ///|

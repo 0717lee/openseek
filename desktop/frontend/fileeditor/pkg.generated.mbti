@@ -275,6 +275,7 @@ pub(all) enum Msg {
   DiagnosticsPublished(channel~ : @interop.ChannelId, absolute~ : @common.Uri, diagnostics~ : Array[@protocol.LspDiagnostic])
   LanguageRequestFailed(owner~ : @interop.ConversationKey, message~ : String)
   EditorCommentAdded(resource~ : ModelUri, file~ : @pathx.Relative, range~ : @common.Range, quote~ : String, comment~ : String, feedback_id~ : String)
+  ApplyAllFeedback
   DiffCommentAdded(file~ : @pathx.Relative, original_line_number~ : Int?, modified_line_number~ : Int?, quote~ : String, comment~ : String, resource~ : ModelUri?, feedback_id~ : String?)
 }
 
@@ -338,10 +339,16 @@ pub(all) struct SemanticReviewInput {
   mode : @moondiff.MoonDiffMode
   ignore_comments : Bool
   ignore_tests : Bool
+  live_modified : SemanticReviewLiveDocument?
 } derive(Eq, @debug.Debug)
 pub fn SemanticReviewInput::equal(Self, Self) -> Bool
 pub fn SemanticReviewInput::not_equal(Self, Self) -> Bool
 pub fn SemanticReviewInput::to_repr(Self) -> @debug.Repr
+
+pub(all) struct SemanticReviewLiveDocument {
+  resource : @common.Uri
+  path : @pathx.Relative
+} derive(Eq, @debug.Debug)
 
 pub(all) struct State {
   owner : @interop.ConversationKey?
