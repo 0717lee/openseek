@@ -3,6 +3,9 @@
 .transcript {
   min-height: 0;
   overflow: auto;
+  /* Reserve both edges so the centered stream does not shift when overflow
+     appears and the native scrollbar claims its lane. */
+  scrollbar-gutter: stable both-edges;
   padding: 24px 24px 22px;
   background: transparent;
   /* The overview rail's container: its cq units measure this scroller's

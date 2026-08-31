@@ -179,30 +179,33 @@ samp,
   background: var(--color-text-selection);
 }
 
-/* quiet scrollbars */
+/* Shared native scrollbar geometry and visible-thumb inset. */
+html {
+  scrollbar-color: var(--color-scrollbar-thumb) transparent;
+}
+
 ::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
 }
 ::-webkit-scrollbar-thumb {
-  background: color-mix(
-    in srgb,
-    var(--color-text-primary) 14%,
-    transparent
-  );
+  background: var(--color-scrollbar-thumb);
   border-radius: var(--radius-pill);
-  border: 2px solid transparent;
+  border: 1px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: color-mix(
-    in srgb,
-    var(--color-text-primary) 26%,
-    transparent
-  );
+  background: var(--color-scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:active {
+  background: var(--color-scrollbar-thumb-active);
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-corner {
   background: transparent;
 }
 
