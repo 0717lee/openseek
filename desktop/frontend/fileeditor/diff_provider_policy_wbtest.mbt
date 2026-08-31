@@ -1,24 +1,15 @@
 ///|
-test "diff provider forces Core outside .mbt without overwriting preference" {
-  assert_true(
-    effective_diff_provider_mode(ReviewDiffTree, true)
-    is @moon_diff_provider.Tree,
-  )
-  assert_true(
-    effective_diff_provider_mode(ReviewDiffTree, false)
-    is @moon_diff_provider.Core,
-  )
+test "semantic review is available only for MoonBit source files" {
   assert_true(supports_moon_diff("SRC/MAIN.MBT"))
   assert_false(supports_moon_diff("src/main.mbti"))
 }
 
 ///|
-test "selecting a Moon diff algorithm enters Diff view and retains policy" {
+test "selecting a Moon semantic algorithm enters Diff view and retains policy" {
   let initial = State::empty()
   assert_true(initial.review_diff_mode is ReviewDiffCore)
   assert_true(initial.review_diff_ignore_comments)
   assert_true(initial.review_diff_ignore_tests)
-  assert_eq(initial.review_diff_status, None)
 
   let path = @pathx.Relative("src/main.mbt")
   let selected = test_modified_change(path)
@@ -54,7 +45,6 @@ test "selecting a Moon diff algorithm enters Diff view and retains policy" {
     tree.docs.get(path)
     is Some({ review: Some({ view_mode: ReviewDiff, .. }), .. }),
   )
-  assert_eq(tree.review_diff_status, None)
   let (_, include_comments) = update(
     test_emit(),
     ToggleReviewDiffIgnoreComments,
@@ -69,22 +59,10 @@ test "selecting a Moon diff algorithm enters Diff view and retains policy" {
     ctx,
   )
   assert_false(include_tests.review_diff_ignore_tests)
-  let fallback : ReviewDiffStatus = {
-    requested: ReviewDiffTree,
-    effective: ReviewDiffToken,
-    fell_back: true,
-  }
-  let (_, settled) = update(
-    test_emit(),
-    ReviewDiffStatusChanged(fallback),
-    include_tests,
-    ctx,
-  )
-  assert_eq(settled.review_diff_status, Some(fallback))
 }
 
 ///|
-test "diff provider filter preferences survive owner replacement" {
+test "semantic review preferences survive owner replacement" {
   let configured = {
     ..owned_state(),
     review_diff_mode: ReviewDiffTree,
@@ -102,7 +80,7 @@ test "diff provider filter preferences survive owner replacement" {
 }
 
 ///|
-test "non-MoonBit review parks the last Moon provider preference" {
+test "non-MoonBit review parks the last semantic review preference" {
   let path = @pathx.Relative("README.md")
   let selected = test_modified_change(path)
   let docs = owned_state().docs.copy()

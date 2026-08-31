@@ -2,7 +2,11 @@
 /// The dock strip sits above the file breadcrumb and its permanent body hosts.
 /// Child order is structural because Rabbita diffs by index; the viewer and
 /// browser placeholders must not be re-keyed when the active tab changes.
-fn panel_view(input : Input, actions : Actions) -> @html.Html {
+fn panel_view(
+  input : Input,
+  actions : Actions,
+  semantic_review? : @html.Html = @html.nothing,
+) -> @html.Html {
   let chips : Array[@dock.TabChip] = input.dock.tabs.map(tab => {
     match tab {
       File(path~) => {
@@ -124,6 +128,7 @@ fn panel_view(input : Input, actions : Actions) -> @html.Html {
         actions.file_editor,
         input.file_panel,
         input.file_ctx,
+        semantic_review~,
       ),
       @html.div(class="browser-chrome", [
         @preview.toolbar_view(active_page, toolbar),

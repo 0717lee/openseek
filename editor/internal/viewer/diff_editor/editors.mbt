@@ -34,6 +34,8 @@ fn DiffEditorEditors::create(
   editor_options : @code_widget.CodeEditorOptions,
   diff_word_wrap : DiffWordWrap,
   layout : DiffEditorLayout,
+  render_markdown_comments : Bool,
+  handle_mouse_wheel : Bool,
 ) -> DiffEditorEditors {
   let (shared_services, owned_services) = match services {
     Some(services) => (services, None)
@@ -42,10 +44,10 @@ fn DiffEditorEditors::create(
       (services, Some(services))
     }
   }
-  let pane_options = match diff_word_wrap {
+  let pane_options = (match diff_word_wrap {
     Inherit => editor_options.with_folding(false)
     Off => editor_options.with_soft_wrap(false).with_folding(false)
-  }
+  }).with_handle_mouse_wheel(handle_mouse_wheel)
   let editors : DiffEditorEditors = {
     original: @code_widget.CodeEditorWidget::create(
       original_host,
@@ -66,7 +68,7 @@ fn DiffEditorEditors::create(
   // Apply the initial policy before either kernel ever receives a model. This
   // also covers explicit Inline widgets mounted under display:none, where no
   // positive-size layout transaction will run until much later.
-  editors.sync_markdown_comment_presentations(layout)
+  editors.sync_markdown_comment_presentations(layout, render_markdown_comments)
   editors
 }
 
@@ -166,14 +168,15 @@ fn DiffEditorEditors::update_options(
   editor_options : @code_widget.CodeEditorOptions,
   diff_word_wrap : DiffWordWrap,
   layout : DiffEditorLayout,
+  handle_mouse_wheel : Bool,
 ) -> Unit {
   if self.disposed {
     return
   }
-  let pane_options = match diff_word_wrap {
+  let pane_options = (match diff_word_wrap {
     Inherit => editor_options.with_folding(false)
     Off => editor_options.with_soft_wrap(false).with_folding(false)
-  }
+  }).with_handle_mouse_wheel(handle_mouse_wheel)
   // Pinned DiffEditorEditors always updates both kernels. Inline's clipped
   // original must never wrap: deleted text wraps with the modified editor and
   // paired original ViewZones supply the continuation height.
@@ -193,12 +196,15 @@ fn DiffEditorEditors::update_options(
 fn DiffEditorEditors::sync_markdown_comment_presentations(
   self : DiffEditorEditors,
   layout : DiffEditorLayout,
+  enabled : Bool,
 ) -> Unit {
   if self.disposed {
     return
   }
-  self.original.set_markdown_comment_presentation_enabled(layout == SideBySide)
-  self.modified.set_markdown_comment_presentation_enabled(true)
+  self.original.set_markdown_comment_presentation_enabled(
+    enabled && layout == SideBySide,
+  )
+  self.modified.set_markdown_comment_presentation_enabled(enabled)
 }
 
 ///|

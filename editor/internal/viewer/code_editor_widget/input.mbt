@@ -93,6 +93,9 @@ fn CodeEditorWidget::hook_view_input(
     }
   })
   add_view_event_listener(view, view.overflow_guard, "wheel", event => {
+    guard self.configuration.snapshot().options.handle_mouse_wheel else {
+      return
+    }
     match event.to_wheel_event() {
       Some(wheel) =>
         if handler.handle_editor_wheel(event, wheel) {

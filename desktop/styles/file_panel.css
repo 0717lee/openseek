@@ -2094,8 +2094,7 @@ button.git-history-file.selected {
 .review-layout-control.hidden,
 .review-comments-control.hidden,
 .review-tests-control.hidden,
-.review-control-divider.hidden,
-.review-diff-mode-status.hidden {
+.review-control-divider.hidden {
   display: none;
 }
 
@@ -2192,16 +2191,6 @@ button.git-history-file.selected {
   margin-left: auto;
 }
 
-.review-diff-mode-status {
-  flex: 1 1 120px;
-  min-width: 0;
-  max-width: 220px;
-  overflow: hidden;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-  text-overflow: ellipsis;
-}
-
 .review-progress {
   appearance: none;
   font: inherit;
@@ -2222,4 +2211,271 @@ button.git-history-file.selected {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+/* Port of VS Code's MultiDiffEditor container/item presentation from
+   editor/vscode/src/vs/editor/browser/widget/multiDiffEditor/{style.css,
+   diffEditorItemTemplate.ts}. MoonDiff supplies top-level items; each item
+   retains our real DiffEditor while this host owns the single scroll plane. */
+.semantic-review-host {
+  overflow: auto;
+  color: var(--vscode-editor-foreground, var(--color-text-primary));
+  background: var(--vscode-editor-background, var(--color-bg-surface));
+  font-family: var(--font-family-mono);
+  overscroll-behavior: contain;
+}
+
+.semantic-review-host .semantic-review {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
+  min-width: 0;
+}
+
+.semantic-review-host .semantic-document {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  min-width: 0;
+}
+
+.semantic-review-host .semantic-review-scroll-width {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 1px;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.semantic-review-host .semantic-diff-entry {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+  background: var(--vscode-editor-background, var(--color-bg-surface));
+}
+
+.semantic-review-host .semantic-entry-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-sizing: border-box;
+  width: 100%;
+  height: 40px;
+  margin: 0;
+  padding-top: 8px;
+  background: var(--vscode-editor-background, var(--color-bg-surface));
+}
+
+.semantic-review-host .semantic-entry-header-content {
+  appearance: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--color-separator);
+  border-bottom: 1px solid var(--color-separator);
+  border-radius: 0;
+  padding: 4px 5px;
+  color: var(--vscode-editor-foreground, var(--color-text-primary));
+  background: var(--color-bg-subtle);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.semantic-review-host .semantic-diff-entry.collapsed
+  .semantic-entry-header-content {
+  border-bottom-color: transparent;
+}
+
+.semantic-review-host .semantic-entry-header-content:hover {
+  background: color-mix(
+    in srgb,
+    var(--color-text-primary) 5%,
+    var(--color-bg-subtle)
+  );
+}
+
+.semantic-review-host .semantic-entry-header-content:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+.semantic-review-host .semantic-entry-chevron {
+  flex: 0 0 16px;
+  width: 16px;
+  margin: 0 5px;
+  color: var(--color-text-secondary);
+}
+
+.semantic-review-host .semantic-entry-file-icon {
+  position: relative;
+  flex: 0 0 13px;
+  box-sizing: border-box;
+  width: 13px;
+  height: 16px;
+  margin-right: 7px;
+  border: 1px solid currentColor;
+  border-radius: 1px;
+  color: var(--color-text-secondary);
+  opacity: 0.8;
+}
+
+.semantic-review-host .semantic-entry-file-icon::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  bottom: 3px;
+  left: 3px;
+  border-top: 1px solid currentColor;
+  box-shadow: 0 -3px 0 currentColor;
+}
+
+.semantic-review-host .semantic-entry-path {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.semantic-review-host .semantic-entry-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.semantic-review-host .semantic-entry-location {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 8px;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.semantic-review-host .semantic-entry-location:empty {
+  display: none;
+}
+
+.semantic-review-host .semantic-entry-status {
+  flex: 0 0 auto;
+  margin: 0 10px;
+  font-weight: 600;
+  line-height: 22px;
+  opacity: 0.8;
+}
+
+.semantic-review-host .semantic-entry-status.added {
+  color: var(--color-success);
+}
+
+.semantic-review-host .semantic-entry-status.deleted {
+  color: var(--color-danger);
+}
+
+.semantic-review-host .semantic-entry-content {
+  border-bottom: 1px solid var(--color-separator);
+  overflow: hidden;
+}
+
+.semantic-review-host .semantic-diff-entry.collapsed .semantic-entry-content {
+  display: none;
+}
+
+.semantic-review-host .semantic-reorder,
+.semantic-review-host .diff-notice {
+  color: var(--color-warning, #806615);
+  background: color-mix(
+    in srgb,
+    var(--color-warning, #b99a36) 9%,
+    var(--vscode-editor-background, var(--color-bg-surface))
+  );
+}
+
+.semantic-review-host .semantic-reorder {
+  margin: 8px 0 0;
+  border-top: 1px solid var(--color-separator);
+  border-bottom: 1px solid var(--color-separator);
+  padding: 7px 12px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.semantic-review-host .diff-notice {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px;
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
+.semantic-review-host .diff-notice strong {
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.semantic-review-host .semantic-empty {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  padding: 24px;
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-sans);
+  text-align: center;
+}
+
+.semantic-review-host .semantic-empty p {
+  margin: 0;
+}
+
+.semantic-review-host .semantic-entry-editor-parent {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.semantic-review-host .semantic-diff-editor-host {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  overflow: hidden;
+  background: var(--vscode-editor-background, var(--color-bg-surface));
+}
+
+.semantic-review-host .semantic-diff-editor-host > .moonbit-diff-editor {
+  position: absolute;
+  inset: 0;
+}
+
+/* Each item expands to content height, so only the shared outer host owns
+   scrollbars. This matches VS Code's per-item `vertical: hidden`,
+   `horizontal: hidden`, and `handleMouseWheel: false` presentation. */
+.semantic-review-host .semantic-diff-editor-host .scrollbar.vertical,
+.semantic-review-host .semantic-diff-editor-host .scrollbar.horizontal {
+  display: none !important;
 }

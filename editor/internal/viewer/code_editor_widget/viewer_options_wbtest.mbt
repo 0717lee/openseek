@@ -2,6 +2,7 @@
 test "viewer options default to no soft wrap view model options" {
   let options = CodeEditorOptions(tab_size=7)
   assert_false(options.smooth_scrolling)
+  assert_true(options.handle_mouse_wheel)
   assert_eq(options.soft_wrap_column_for_content_width(720.0, 7.2), 0)
   let view_model_options = options.view_model_options(
     100,
@@ -9,6 +10,14 @@ test "viewer options default to no soft wrap view model options" {
   )
   assert_false(view_model_options.is_soft_wrap_enabled())
   assert_eq(view_model_options.tab_size, 7)
+}
+
+///|
+test "viewer wheel ownership is a live non-layout option" {
+  let defaults = CodeEditorOptions::default()
+  let external = defaults.with_handle_mouse_wheel(false)
+  assert_false(external.handle_mouse_wheel)
+  assert_true(defaults.same_layout_options(external))
 }
 
 ///|

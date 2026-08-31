@@ -171,6 +171,8 @@ pub fn DiffEditorWidget::create(
     editor_options,
     options.diff_word_wrap,
     options.layout,
+    options.render_markdown_comments,
+    options.handle_mouse_wheel,
   )
   let view_model = DiffEditorViewModel(provider, options={
     ignore_trim_whitespace: options.ignore_trim_whitespace,
@@ -1382,10 +1384,12 @@ pub fn DiffEditorWidget::update_options(
       editor_options,
       options.diff_word_wrap,
       self.layout_state.actual_layout,
+      options.handle_mouse_wheel,
     )
     self.apply_layout_dom()
     self.editors.sync_markdown_comment_presentations(
       self.layout_state.actual_layout,
+      options.render_markdown_comments,
     )
     self.layout_editors_after_render()
   }
@@ -1399,6 +1403,39 @@ pub fn DiffEditorWidget::get_layout(
   self : DiffEditorWidget,
 ) -> DiffEditorLayout {
   self.layout_state.actual_layout
+}
+
+///|
+/// Total height required by the taller pane, including diff alignment view
+/// zones. Hosts that stack independent DiffEditors use this to size each
+/// section without introducing a nested vertical scrollbar.
+pub fn DiffEditorWidget::get_content_height(self : DiffEditorWidget) -> Double {
+  self.editors.original
+  .get_content_height()
+  .max(self.editors.modified.get_content_height())
+}
+
+///|
+/// Largest horizontal overflow of either code pane. MultiDiffEditor uses one
+/// outer horizontal scrollbar and projects its offset into every item, just as
+/// VS Code's DiffEditorItemTemplate reports `maxScroll` to its parent widget.
+pub fn DiffEditorWidget::get_max_scroll_left(self : DiffEditorWidget) -> Double {
+  let original = (self.editors.original.get_scroll_width() -
+  self.editors.original.get_layout_info().content_width).max(0.0)
+  let modified = (self.editors.modified.get_scroll_width() -
+  self.editors.modified.get_layout_info().content_width).max(0.0)
+  original.max(modified)
+}
+
+///|
+/// Apply the MultiDiffEditor's shared horizontal offset to both panes. The
+/// existing pane synchronization absorbs any resulting scroll event echo.
+pub fn DiffEditorWidget::set_scroll_left(
+  self : DiffEditorWidget,
+  scroll_left : Double,
+) -> Unit {
+  self.editors.original.set_scroll_left(scroll_left)
+  self.editors.modified.set_scroll_left(scroll_left)
 }
 
 ///|
@@ -1721,10 +1758,12 @@ pub fn DiffEditorWidget::layout(self : DiffEditorWidget) -> Unit {
     self.editor_options,
     self.options.diff_word_wrap,
     self.layout_state.actual_layout,
+    self.options.handle_mouse_wheel,
   )
   self.apply_layout_dom()
   self.editors.sync_markdown_comment_presentations(
     self.layout_state.actual_layout,
+    self.options.render_markdown_comments,
   )
   self.layout_editors_after_render()
 }

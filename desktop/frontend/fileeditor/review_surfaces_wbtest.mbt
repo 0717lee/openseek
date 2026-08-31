@@ -67,6 +67,11 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
       "id=\"diff-editor-host\" class=\"viewer-host editor-shell moonbit-viewer-surface-hidden\"",
     ),
   )
+  assert_true(
+    source.contains(
+      "id=\"semantic-review-host\" class=\"viewer-host editor-shell semantic-review-host moonbit-viewer-surface-hidden\"",
+    ),
+  )
   inspect(
     render_review_control(review_mode_toolbar(test_emit(), source_state, ctx)),
     content=(
@@ -145,6 +150,11 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   )
   assert_true(
     diff.contains("id=\"diff-editor-host\" class=\"viewer-host editor-shell\""),
+  )
+  assert_true(
+    diff.contains(
+      "id=\"semantic-review-host\" class=\"viewer-host editor-shell semantic-review-host moonbit-viewer-surface-hidden\"",
+    ),
   )
   inspect(
     render_review_control(review_mode_toolbar(test_emit(), diff_state, ctx)),
@@ -234,36 +244,72 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
     ),
   )
 
-  let fallback_state = {
-    ..diff_state,
-    review_diff_mode: ReviewDiffTree,
-    review_diff_status: Some({
-      requested: ReviewDiffTree,
-      effective: ReviewDiffToken,
-      fell_back: true,
-    }),
-  }
-  inspect(
-    render_review_control(review_diff_status(fallback_state, ctx)),
-    content=(
-      #|<span role="status" aria-live="polite" class="review-diff-mode-status">Tree unavailable — showing Token diff</span>
+  let token_state = { ..diff_state, review_diff_mode: ReviewDiffToken, }
+  let token = render_review_html(body_view(test_emit(), token_state, ctx))
+  assert_true(
+    token.contains(
+      "id=\"viewer-host\" class=\"viewer-host editor-shell moonbit-viewer-surface-hidden\"",
     ),
   )
-
-  let core_fallback_state = {
-    ..diff_state,
-    review_diff_mode: ReviewDiffToken,
-    review_diff_status: Some({
-      requested: ReviewDiffToken,
-      effective: ReviewDiffCore,
-      fell_back: true,
-    }),
-  }
-  inspect(
-    render_review_control(review_diff_status(core_fallback_state, ctx)),
-    content=(
-      #|<span role="status" aria-live="polite" class="review-diff-mode-status">Token unavailable — showing Line diff</span>
+  assert_true(
+    token.contains(
+      "id=\"markdown-viewer-host\" class=\"viewer-host editor-shell moonbit-viewer-surface-hidden\"",
     ),
+  )
+  assert_true(
+    token.contains(
+      "id=\"diff-editor-host\" class=\"viewer-host editor-shell moonbit-viewer-surface-hidden\"",
+    ),
+  )
+  assert_true(
+    token.contains(
+      "id=\"semantic-review-host\" class=\"viewer-host editor-shell semantic-review-host\"",
+    ),
+  )
+  let token_navigation = render_review_html(
+    review_diff_navigation(
+      test_emit(),
+      { ..token_state, review_diff_navigation_available: true, },
+      ctx,
+    ),
+  )
+  assert_true(token_navigation.contains("review-diff-navigation hidden"))
+  assert_false(
+    token_navigation.contains("aria-label=\"Diff change navigation\""),
+  )
+
+  let tree_state = { ..diff_state, review_diff_mode: ReviewDiffTree, }
+  let tree = render_review_html(body_view(test_emit(), tree_state, ctx))
+  assert_true(
+    tree.contains(
+      "id=\"viewer-host\" class=\"viewer-host editor-shell moonbit-viewer-surface-hidden\"",
+    ),
+  )
+  assert_true(
+    tree.contains(
+      "id=\"markdown-viewer-host\" class=\"viewer-host editor-shell moonbit-viewer-surface-hidden\"",
+    ),
+  )
+  assert_true(
+    tree.contains(
+      "id=\"diff-editor-host\" class=\"viewer-host editor-shell moonbit-viewer-surface-hidden\"",
+    ),
+  )
+  assert_true(
+    tree.contains(
+      "id=\"semantic-review-host\" class=\"viewer-host editor-shell semantic-review-host\"",
+    ),
+  )
+  let tree_navigation = render_review_html(
+    review_diff_navigation(
+      test_emit(),
+      { ..tree_state, review_diff_navigation_available: true, },
+      ctx,
+    ),
+  )
+  assert_true(tree_navigation.contains("review-diff-navigation hidden"))
+  assert_false(
+    tree_navigation.contains("aria-label=\"Diff change navigation\""),
   )
 
   inspect(
@@ -320,6 +366,11 @@ test "desktop explicitly routes Markdown source while DiffEditor stays code-only
       "id=\"diff-editor-host\" class=\"viewer-host editor-shell moonbit-viewer-surface-hidden\"",
     ),
   )
+  assert_true(
+    source.contains(
+      "id=\"semantic-review-host\" class=\"viewer-host editor-shell semantic-review-host moonbit-viewer-surface-hidden\"",
+    ),
+  )
 
   let selected = test_modified_change(path)
   let diff_docs = docs.copy()
@@ -349,10 +400,15 @@ test "desktop explicitly routes Markdown source while DiffEditor stays code-only
   assert_true(
     diff.contains("id=\"diff-editor-host\" class=\"viewer-host editor-shell\""),
   )
+  assert_true(
+    diff.contains(
+      "id=\"semantic-review-host\" class=\"viewer-host editor-shell semantic-review-host moonbit-viewer-surface-hidden\"",
+    ),
+  )
 }
 
 ///|
-test "non-MoonBit review keeps File and Line without specialized controls" {
+test "non-MoonBit review keeps File and Line on the Core surface" {
   let path = @pathx.Relative("README.md")
   let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path), }
   let selected = test_modified_change(path)
@@ -367,17 +423,26 @@ test "non-MoonBit review keeps File and Line without specialized controls" {
       selected,
     }),
   }
-  let state = {
-    ..owned_state(),
-    docs,
-    review_diff_mode: ReviewDiffTree,
-    // Reproduce switching away after a Moon provider reported a fallback.
-    review_diff_status: Some({
-      requested: ReviewDiffTree,
-      effective: ReviewDiffToken,
-      fell_back: true,
-    }),
-  }
+  let state = { ..owned_state(), docs, review_diff_mode: ReviewDiffTree, }
+  let body = render_review_html(body_view(test_emit(), state, ctx))
+  assert_true(
+    body.contains(
+      "id=\"viewer-host\" class=\"viewer-host editor-shell moonbit-viewer-surface-hidden\"",
+    ),
+  )
+  assert_true(
+    body.contains(
+      "id=\"markdown-viewer-host\" class=\"viewer-host editor-shell moonbit-viewer-surface-hidden\"",
+    ),
+  )
+  assert_true(
+    body.contains("id=\"diff-editor-host\" class=\"viewer-host editor-shell\""),
+  )
+  assert_true(
+    body.contains(
+      "id=\"semantic-review-host\" class=\"viewer-host editor-shell semantic-review-host moonbit-viewer-surface-hidden\"",
+    ),
+  )
   inspect(
     render_review_control(review_mode_toolbar(test_emit(), state, ctx)),
     content=(
@@ -409,13 +474,6 @@ test "non-MoonBit review keeps File and Line without specialized controls" {
     render_review_control(review_tests_control(test_emit(), state, ctx)),
     content=(
       #|<span class="review-tests-control hidden">
-      #|</span>
-    ),
-  )
-  inspect(
-    render_review_control(review_diff_status(state, ctx)),
-    content=(
-      #|<span role="status" aria-live="polite" class="review-diff-mode-status hidden">
       #|</span>
     ),
   )
@@ -467,6 +525,11 @@ test "pending full diff never reveals the source surface" {
       "id=\"diff-editor-host\" class=\"viewer-host editor-shell\"",
     ),
   )
+  assert_true(
+    pending.contains(
+      "id=\"semantic-review-host\" class=\"viewer-host editor-shell semantic-review-host moonbit-viewer-surface-hidden\"",
+    ),
+  )
   assert_false(pending.contains("Loading diff for main.mbt…"))
   assert_true(pending.contains("viewer-notice diff-transition-shield"))
   let pending_breadcrumb = render_review_html(
@@ -507,6 +570,11 @@ test "pending full diff never reveals the source surface" {
   assert_true(
     unavailable.contains(
       "id=\"diff-editor-host\" class=\"viewer-host editor-shell moonbit-viewer-surface-hidden\"",
+    ),
+  )
+  assert_true(
+    unavailable.contains(
+      "id=\"semantic-review-host\" class=\"viewer-host editor-shell semantic-review-host moonbit-viewer-surface-hidden\"",
     ),
   )
 }

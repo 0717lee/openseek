@@ -47,6 +47,9 @@ struct CodeEditorOptions {
   /// Monaco's `smoothScrolling` option (`false` by default). Physical mouse
   /// wheels animate for 125 ms when enabled; trackpads remain immediate.
   smooth_scrolling : Bool
+  /// Monaco's `handleMouseWheel` option (`true` by default). MultiDiffEditor
+  /// items disable this so their single outer scroll plane owns wheel input.
+  handle_mouse_wheel : Bool
   /// Monaco's `showUnused` editor option (default `true`,
   /// `editorOptions.ts:6645-6647`): adds the `showUnused` root class that
   /// gates the `squiggly-unnecessary` / `squiggly-inline-unnecessary`
@@ -97,6 +100,7 @@ pub fn CodeEditorOptions::CodeEditorOptions(
   folding_maximum_regions? : Int = 5000,
   unfold_on_click_after_end_of_line? : Bool = false,
   smooth_scrolling? : Bool = false,
+  handle_mouse_wheel? : Bool = true,
   show_unused? : Bool = true,
   show_deprecated? : Bool = true,
   font_family? : String = @config.editor_font_defaults.font_family,
@@ -124,6 +128,7 @@ pub fn CodeEditorOptions::CodeEditorOptions(
     folding_maximum_regions,
     unfold_on_click_after_end_of_line,
     smooth_scrolling,
+    handle_mouse_wheel,
     show_unused,
     show_deprecated,
     font_family,
@@ -149,6 +154,7 @@ fn CodeEditorOptions::same_layout_options(
     show_unused: other.show_unused,
     show_deprecated: other.show_deprecated,
     smooth_scrolling: other.smooth_scrolling,
+    handle_mouse_wheel: other.handle_mouse_wheel,
   } ==
   other
 }
@@ -266,6 +272,15 @@ pub fn CodeEditorOptions::with_folding(
   folding : Bool,
 ) -> CodeEditorOptions {
   { ..self, folding, }
+}
+
+///|
+/// Returns a copy with Monaco's `handleMouseWheel` policy changed.
+pub fn CodeEditorOptions::with_handle_mouse_wheel(
+  self : CodeEditorOptions,
+  handle_mouse_wheel : Bool,
+) -> CodeEditorOptions {
+  { ..self, handle_mouse_wheel, }
 }
 
 ///|

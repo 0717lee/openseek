@@ -1,9 +1,10 @@
 // The embedded read-only code viewer (moonbitlang/editor). Rabbita has
-// no escape hatch for a foreign DOM widget, so the source viewer and full-diff
-// comparison each own a stable, never-diffed host element. The view renders both
-// hosts empty, and after the first paint each widget attaches its imperative DOM.
-// The host elements are always rendered (merely hidden by CSS when inactive or
-// the panel is closed), so each widget attaches once and survives screen switches.
+// no escape hatch for a foreign DOM widget, so the source viewer and Core
+// full-file comparison each own a stable, never-diffed host element. The view
+// renders those hosts empty, and after the first paint each widget attaches its
+// imperative DOM. Token/Tree uses a fourth stable sibling containing keyed,
+// empty per-section hosts; each receives a real DiffEditor. Every top-level
+// stays independent, so no global monotonic line mapping is synthesized.
 
 ///|
 /// The id of the stable element the viewer attaches into; the panel view must
@@ -19,6 +20,11 @@ const MarkdownViewerHostId = "markdown-viewer-host"
 ///|
 /// The stable sibling host reserved for the switchable DiffEditor.
 const DiffEditorHostId = "diff-editor-host"
+
+///|
+/// The stable sibling host for Token/Tree semantic review. Rabbita owns its
+/// section chrome and the imperative section DiffEditors own their host DOM.
+const SemanticReviewHostId = "semantic-review-host"
 
 ///|
 /// A model in this URI scheme is a Git HEAD snapshot, not a document the
@@ -67,13 +73,6 @@ priv struct ViewerHost {
   // Desired full-comparison layout survives a pre-mount command in the same
   // way font settings do for the source Viewer.
   mut diff_options : @viewer.DiffEditorOptions
-  // Desktop owns MoonBit-specific comparison policy. The provider stays
-  // outside the reusable editor so non-`.mbt` documents can force Core while
-  // retaining the user's last Token/Tree preference.
-  diff_provider : @moon_diff_provider.MoonDocumentDiffProvider
-  mut diff_mode : ReviewDiffMode
-  mut diff_ignore_comments : Bool
-  mut diff_ignore_tests : Bool
   // A positioned transcript link keeps its caret collapsed at the requested
   // column. This persistent whole-line decoration makes the destination visible
   // without turning the line into a selection and opening Comment UI. Symbol
@@ -139,10 +138,6 @@ let viewer_state : ViewerHost = {
     automatic_inline=false,
     diff_word_wrap=@viewer.Off,
   ),
-  diff_provider: @moon_diff_provider.MoonDocumentDiffProvider(),
-  diff_mode: ReviewDiffCore,
-  diff_ignore_comments: true,
-  diff_ignore_tests: true,
   point_range_highlight: None,
   search_match_highlights: None,
   services: None,
@@ -178,6 +173,7 @@ priv enum ActiveEditorSurface {
   CodeEditorSurface
   MarkdownEditorSurface
   DiffEditorSurface
+  SemanticEditorSurface
 }
 
 ///|
@@ -185,8 +181,11 @@ fn active_editor_surface_from_visibility(
   code_visible : Bool,
   markdown_visible : Bool,
   diff_visible : Bool,
+  semantic_visible : Bool,
 ) -> ActiveEditorSurface? {
-  if diff_visible {
+  if semantic_visible {
+    Some(SemanticEditorSurface)
+  } else if diff_visible {
     Some(DiffEditorSurface)
   } else if markdown_visible {
     Some(MarkdownEditorSurface)
@@ -212,6 +211,7 @@ fn active_editor_surface() -> ActiveEditorSurface? {
     editor_surface_host_visible(ViewerHostId),
     editor_surface_host_visible(MarkdownViewerHostId),
     editor_surface_host_visible(DiffEditorHostId),
+    editor_surface_host_visible(SemanticReviewHostId),
   )
 }
 
@@ -233,6 +233,7 @@ fn layout_active_editor_surface() -> Unit {
         Some(viewer) => viewer.layout()
         None => ()
       }
+    Some(SemanticEditorSurface) => layout_semantic_review_editors()
     None => ()
   }
 }
@@ -282,26 +283,6 @@ fn register_tokenizers() -> Unit {
 }
 
 ///|
-fn ReviewDiffMode::provider_mode(
-  self : ReviewDiffMode,
-) -> @moon_diff_provider.MoonDiffMode {
-  match self {
-    ReviewDiffCore => @moon_diff_provider.Core
-    ReviewDiffToken => @moon_diff_provider.Token
-    ReviewDiffTree => @moon_diff_provider.Tree
-  }
-}
-
-///|
-fn review_diff_mode(mode : @moon_diff_provider.MoonDiffMode) -> ReviewDiffMode {
-  match mode {
-    @moon_diff_provider.Core => ReviewDiffCore
-    @moon_diff_provider.Token => ReviewDiffToken
-    @moon_diff_provider.Tree => ReviewDiffTree
-  }
-}
-
-///|
 fn supports_moon_diff(path : String) -> Bool {
   path.to_lower().has_suffix(".mbt")
 }
@@ -318,51 +299,6 @@ fn markdown_resource_kind(name : String) -> @viewer.MarkdownResourceKind {
   } else {
     @viewer.OrdinaryMarkdown
   }
-}
-
-///|
-fn effective_diff_provider_mode(
-  mode : ReviewDiffMode,
-  supports_moonbit : Bool,
-) -> @moon_diff_provider.MoonDiffMode {
-  if supports_moonbit {
-    mode.provider_mode()
-  } else {
-    @moon_diff_provider.Core
-  }
-}
-
-///|
-fn configure_diff_provider(supports_moonbit : Bool) -> Unit {
-  let provider_mode = effective_diff_provider_mode(
-    viewer_state.diff_mode,
-    supports_moonbit,
-  )
-  viewer_state.diff_provider.set_ignore_comments(
-    viewer_state.diff_ignore_comments,
-  )
-  viewer_state.diff_provider.set_ignore_tests(viewer_state.diff_ignore_tests)
-  viewer_state.diff_provider.set_mode(provider_mode)
-}
-
-///|
-/// Apply desktop-owned provider preferences to the current comparison. The
-/// requested Moon mode is retained even when a non-`.mbt` model forces Core.
-fn apply_review_diff_provider(
-  mode : ReviewDiffMode,
-  ignore_comments : Bool,
-  ignore_tests : Bool,
-) -> @cmd.Cmd {
-  @cmd.custom_cmd(_scheduler => {
-    viewer_state.diff_mode = mode
-    viewer_state.diff_ignore_comments = ignore_comments
-    viewer_state.diff_ignore_tests = ignore_tests
-    let supports_moonbit = viewer_state.diff_editor
-      .bind(editor => editor.get_model())
-      .map(model => supports_moon_diff(model.modified.uri.path))
-      .unwrap_or(false)
-    configure_diff_provider(supports_moonbit)
-  })
 }
 
 ///|
@@ -504,7 +440,6 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           diff_host,
           services=services.viewer_services,
           options=viewer_state.diff_options,
-          provider=viewer_state.diff_provider,
         )
         diff_editor.on_did_update_diff(() => {
           let navigation_available = if diff_editor.is_diff_up_to_date() {
@@ -520,18 +455,6 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
               ReviewDiffNavigationAvailabilityChanged(navigation_available),
             ),
           )
-          if diff_editor.is_diff_up_to_date() {
-            let status = viewer_state.diff_provider.get_status()
-            scheduler.add(
-              dispatch(
-                ReviewDiffStatusChanged({
-                  requested: review_diff_mode(status.requested),
-                  effective: review_diff_mode(status.effective),
-                  fell_back: status.fell_back,
-                }),
-              ),
-            )
-          }
         })
         |> ignore
         viewer_state.diff_editor = Some(diff_editor)
@@ -577,6 +500,7 @@ fn apply_review_diff_layout(layout : ReviewDiffLayout) -> @cmd.Cmd {
     if viewer_state.diff_editor is Some(diff_editor) {
       diff_editor.update_options(options)
     }
+    update_semantic_review_editor_layout(layout)
   })
 }
 
@@ -599,6 +523,7 @@ fn refresh_diff_pane_options() -> Unit {
   if viewer_state.diff_editor is Some(diff_editor) {
     diff_editor.update_options(options)
   }
+  refresh_semantic_review_editor_options()
 }
 
 ///|
@@ -809,7 +734,6 @@ fn show_diff_comparison(
     "diff-v" + model_version.to_string(),
     modified_content,
   )
-  configure_diff_provider(supports_moon_diff(name))
   let previous = diff_editor.set_model(
     Some(@viewer.DiffEditorModel(original_model, modified_model)),
   )
@@ -902,7 +826,6 @@ fn show_history_diff_in_viewer(
       "history-modified-v" + version.to_string(),
       modified_content,
     )
-    configure_diff_provider(supports_moon_diff(diff.path.0))
     let previous = diff_editor.set_model(
       Some(@viewer.DiffEditorModel(original_model, modified_model)),
     )
@@ -1414,6 +1337,7 @@ fn clear_viewer() -> @cmd.Cmd {
     viewer_state.relative = None
     viewer_state.navigation = None
     clear_diff_comparison()
+    clear_semantic_review_editors()
   })
 }
 

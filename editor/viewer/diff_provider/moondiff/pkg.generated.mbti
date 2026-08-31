@@ -5,10 +5,12 @@ import {
   "moonbitlang/core/debug",
   "moonbitlang/editor/base/common",
   "moonbitlang/editor/viewer/common/diff",
-  "moonbitlang/editor/viewer/common/model",
 }
 
 // Values
+pub fn compute_sectioned_semantic_review_plan(String, String, MoonDiffMode, old_name? : String, new_name? : String, ignore_comments? : Bool, ignore_tests? : Bool) -> SectionedSemanticReviewPlan?
+
+pub fn fragment_document_diff(@moonbit-community/moondiff/model.HunkDocument, String, String) -> @diff.DocumentDiff?
 
 // Errors
 
@@ -22,34 +24,77 @@ pub fn MoonDiffMode::equal(Self, Self) -> Bool
 pub fn MoonDiffMode::not_equal(Self, Self) -> Bool
 pub fn MoonDiffMode::to_repr(Self) -> @debug.Repr
 
-pub(all) struct MoonDiffStatus {
-  requested : MoonDiffMode
-  effective : MoonDiffMode
-  fell_back : Bool
+pub struct MoonFragmentDiffProvider {
+  document : @diff.DocumentDiff
 } derive(Eq, @debug.Debug)
-pub fn MoonDiffStatus::equal(Self, Self) -> Bool
-pub fn MoonDiffStatus::not_equal(Self, Self) -> Bool
-pub fn MoonDiffStatus::to_repr(Self) -> @debug.Repr
+pub fn MoonFragmentDiffProvider::MoonFragmentDiffProvider(@diff.DocumentDiff) -> Self
+pub fn MoonFragmentDiffProvider::as_document_diff_provider(Self) -> &@diff.DocumentDiffProvider
+pub impl @diff.DocumentDiffProvider for MoonFragmentDiffProvider
 
-pub struct MoonDocumentDiffProvider {
-  mut mode : MoonDiffMode
-  mut ignore_comments : Bool
-  mut ignore_tests : Bool
-  mut status : MoonDiffStatus
-  did_change : @common.Emitter[Unit]
-  mut disposed : Bool
-}
-pub fn MoonDocumentDiffProvider::MoonDocumentDiffProvider(mode? : MoonDiffMode, ignore_comments? : Bool, ignore_tests? : Bool) -> Self
-pub fn MoonDocumentDiffProvider::as_document_diff_provider(Self) -> &@diff.DocumentDiffProvider
-pub fn MoonDocumentDiffProvider::dispose(Self) -> Unit
-pub fn MoonDocumentDiffProvider::get_ignore_comments(Self) -> Bool
-pub fn MoonDocumentDiffProvider::get_ignore_tests(Self) -> Bool
-pub fn MoonDocumentDiffProvider::get_mode(Self) -> MoonDiffMode
-pub fn MoonDocumentDiffProvider::get_status(Self) -> MoonDiffStatus
-pub fn MoonDocumentDiffProvider::set_ignore_comments(Self, Bool) -> Unit
-pub fn MoonDocumentDiffProvider::set_ignore_tests(Self, Bool) -> Unit
-pub fn MoonDocumentDiffProvider::set_mode(Self, MoonDiffMode) -> Unit
-pub impl @diff.DocumentDiffProvider for MoonDocumentDiffProvider
+pub(all) struct SectionedSemanticReviewPlan {
+  requested : MoonDiffMode
+  status : SemanticReviewStatus
+  reordered : Bool
+  main_sections : Array[SemanticReviewSection]
+  deleted_sections : Array[SemanticReviewSection]
+} derive(Eq, @debug.Debug)
+pub fn SectionedSemanticReviewPlan::equal(Self, Self) -> Bool
+pub fn SectionedSemanticReviewPlan::not_equal(Self, Self) -> Bool
+pub fn SectionedSemanticReviewPlan::to_repr(Self) -> @debug.Repr
+
+pub(all) enum SemanticReviewDiff {
+  Core
+  Fragment(@diff.DocumentDiff)
+} derive(Eq, @debug.Debug)
+pub fn SemanticReviewDiff::equal(Self, Self) -> Bool
+pub fn SemanticReviewDiff::not_equal(Self, Self) -> Bool
+pub fn SemanticReviewDiff::to_repr(Self) -> @debug.Repr
+
+pub(all) struct SemanticReviewSection {
+  key : String
+  identity : Int?
+  kind : SemanticReviewSectionKind
+  old_range : SemanticReviewSourceRange?
+  new_range : SemanticReviewSourceRange?
+  old_context : String?
+  new_context : String?
+  fallbacks : Array[String]
+  original_source : String
+  modified_source : String
+  diff : SemanticReviewDiff
+} derive(Eq, @debug.Debug)
+pub fn SemanticReviewSection::equal(Self, Self) -> Bool
+pub fn SemanticReviewSection::not_equal(Self, Self) -> Bool
+pub fn SemanticReviewSection::to_repr(Self) -> @debug.Repr
+
+pub(all) enum SemanticReviewSectionKind {
+  Whole
+  Matched
+  Deleted
+  Inserted
+} derive(Eq, @debug.Debug)
+pub fn SemanticReviewSectionKind::equal(Self, Self) -> Bool
+pub fn SemanticReviewSectionKind::not_equal(Self, Self) -> Bool
+pub fn SemanticReviewSectionKind::to_repr(Self) -> @debug.Repr
+
+pub(all) struct SemanticReviewSourceRange {
+  start_line_number : Int
+  line_count : Int
+} derive(Eq, @debug.Debug)
+pub fn SemanticReviewSourceRange::equal(Self, Self) -> Bool
+pub fn SemanticReviewSourceRange::not_equal(Self, Self) -> Bool
+pub fn SemanticReviewSourceRange::to_repr(Self) -> @debug.Repr
+
+pub(all) enum SemanticReviewStatus {
+  Identical
+  Changed
+  Reordered
+  NoStructuralChanges
+  IgnoredOnly
+} derive(Eq, @debug.Debug)
+pub fn SemanticReviewStatus::equal(Self, Self) -> Bool
+pub fn SemanticReviewStatus::not_equal(Self, Self) -> Bool
+pub fn SemanticReviewStatus::to_repr(Self) -> @debug.Repr
 
 // Type aliases
 

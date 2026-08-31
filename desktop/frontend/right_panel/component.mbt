@@ -54,7 +54,12 @@ pub fn component(
   input : @rabbita.Val[Input],
   actions : Actions,
 ) -> @rabbita.Val[@html.Html] {
-  input.map(input => panel_view(input, actions))
+  let semantic_review = input.map(input => {
+    @fileeditor.semantic_review_view(actions.file_editor, input.file_panel)
+  })
+  input.view2(semantic_review, (input, semantic_review) => {
+    panel_view(input, actions, semantic_review~)
+  })
 }
 
 ///|
