@@ -188,7 +188,8 @@ fn CodeEditorWidget::folding_on_hidden_ranges_changes(
   hidden_ranges : Array[@base_common.Range],
 ) -> Unit {
   guard self.folding_controller() is Some(controller) else { return }
-  if controller.hidden_range_model is Some(hidden_range_model) &&
+  if !controller.restoring_view_state &&
+    controller.hidden_range_model is Some(hidden_range_model) &&
     hidden_ranges.length() > 0 {
     match self.get_selections() {
       Some(selections) =>

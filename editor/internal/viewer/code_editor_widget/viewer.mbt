@@ -139,6 +139,7 @@ priv struct HorizontalRevealRangeRequest {
 struct CodeEditorViewState {
   scroll_top : Double
   scroll_left : Double
+  folding_state : @folding_browser.FoldingStateMemento?
 } derive(Debug)
 
 ///|
@@ -832,24 +833,38 @@ pub fn CodeEditorWidget::has_text_focus(self : CodeEditorWidget) -> Bool {
 }
 
 ///|
-/// Returns the current scroll state in host-restorable form — Monaco's
-/// `saveViewState` (`cew:1038-1041`). No model → `None`.
+/// Returns the current scroll and contribution state in host-restorable form
+/// — Monaco's `saveViewState` (`cew:1038-1049`). No model → `None`.
 pub fn CodeEditorWidget::save_view_state(
   self : CodeEditorWidget,
 ) -> CodeEditorViewState? {
   guard self.active_scroll_position() is Some(position) else { return None }
-  Some({ scroll_top: position.scroll_top, scroll_left: position.scroll_left, })
+  let folding_state = match self.folding_controller() {
+    Some(controller) => controller.save_view_state()
+    None => None
+  }
+  Some({
+    scroll_top: position.scroll_top,
+    scroll_left: position.scroll_left,
+    folding_state,
+  })
 }
 
 ///|
-/// Restores a previously captured scroll state — Monaco's `restoreViewState`
-/// (`cew:1052`): a no-op without a model, and `None` state restores nothing.
+/// Restores a previously captured contribution and scroll state — Monaco's
+/// `restoreViewState` (`cew:1052-1071`): contribution state is applied before
+/// the view state; a no-op without a model, and `None` restores nothing.
 pub fn CodeEditorWidget::restore_view_state(
   self : CodeEditorWidget,
   state : CodeEditorViewState?,
 ) -> Unit {
   match state {
     Some(state) => {
+      match (self.folding_controller(), state.folding_state) {
+        (Some(controller), Some(folding_state)) =>
+          controller.restore_view_state(folding_state)
+        _ => ()
+      }
       self.set_active_scroll_position(
         scroll_top=state.scroll_top,
         scroll_left=state.scroll_left,
