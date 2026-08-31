@@ -131,6 +131,7 @@ pub struct DiffEditorWidget {
   mut modified_alignment_geometry : PaneGeometrySnapshot?
   mut diff_state : DiffState?
   mut pending_reveal_first_diff_generation : Int?
+  mut pending_reveal_last_diff_generation : Int?
   mut reconciling_generation : Int
   mut is_reconciling : Bool
   layout_render_waiters : Array[@common.Disposable]
@@ -161,8 +162,11 @@ pub fn DiffEditorWidget::layout(Self) -> Unit
 pub fn DiffEditorWidget::lifecycle_snapshot(Self) -> DiffEditorWidgetLifecycleSnapshot
 pub fn DiffEditorWidget::on_did_update_diff(Self, () -> Unit) -> @common.Disposable
 pub fn DiffEditorWidget::reveal_first_diff(Self) -> Unit
+pub fn DiffEditorWidget::reveal_last_diff(Self) -> Unit
 pub fn DiffEditorWidget::reveal_next_change(Self) -> Bool
+pub fn DiffEditorWidget::reveal_next_change_without_wrap(Self) -> Bool
 pub fn DiffEditorWidget::reveal_previous_change(Self) -> Bool
+pub fn DiffEditorWidget::reveal_previous_change_without_wrap(Self) -> Bool
 pub fn DiffEditorWidget::set_diff_provider(Self, &@diff.DocumentDiffProvider) -> Unit
 pub fn DiffEditorWidget::set_model(Self, DiffEditorModelData?) -> DiffEditorModelData?
 pub fn DiffEditorWidget::set_scroll_left(Self, Double) -> Unit

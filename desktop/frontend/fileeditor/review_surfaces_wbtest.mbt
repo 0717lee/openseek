@@ -244,7 +244,9 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
     ),
   )
 
-  let token_state = { ..diff_state, review_diff_mode: ReviewDiffToken, }
+  let token_state = { ..diff_state, review_diff_mode: ReviewDiffToken, }.sync_semantic_review(
+    ctx,
+  )
   let token = render_review_html(body_view(test_emit(), token_state, ctx))
   assert_true(
     token.contains(
@@ -273,12 +275,14 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
       ctx,
     ),
   )
-  assert_true(token_navigation.contains("review-diff-navigation hidden"))
-  assert_false(
+  assert_true(
     token_navigation.contains("aria-label=\"Diff change navigation\""),
   )
+  assert_false(token_navigation.contains("disabled"))
 
-  let tree_state = { ..diff_state, review_diff_mode: ReviewDiffTree, }
+  let tree_state = { ..diff_state, review_diff_mode: ReviewDiffTree, }.sync_semantic_review(
+    ctx,
+  )
   let tree = render_review_html(body_view(test_emit(), tree_state, ctx))
   assert_true(
     tree.contains(
@@ -307,10 +311,8 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
       ctx,
     ),
   )
-  assert_true(tree_navigation.contains("review-diff-navigation hidden"))
-  assert_false(
-    tree_navigation.contains("aria-label=\"Diff change navigation\""),
-  )
+  assert_true(tree_navigation.contains("aria-label=\"Diff change navigation\""))
+  assert_false(tree_navigation.contains("disabled"))
 
   inspect(
     render_review_control(

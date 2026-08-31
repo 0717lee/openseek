@@ -1905,6 +1905,19 @@ fn core_diff_ready(state : State, ctx : Ctx) -> Bool {
 }
 
 ///|
+/// Core receives availability from its mounted provider. Token/Tree plans are
+/// already nonempty change documents, so their aggregate navigation is ready
+/// once at least one semantic item exists.
+fn review_diff_navigation_enabled(state : State, ctx : Ctx) -> Bool {
+  if core_diff_ready(state, ctx) {
+    state.review_diff_navigation_available
+  } else {
+    full_diff_ready(state, ctx) &&
+    !semantic_sections(state.semantic_review_plan).is_empty()
+  }
+}
+
+///|
 fn ReviewDiffMode::label(self : ReviewDiffMode) -> String {
   match self {
     ReviewDiffCore => "Line"
@@ -2143,11 +2156,8 @@ fn review_diff_navigation(
   guard full_diff_available(state, ctx) else {
     return @html.span(class="review-diff-navigation hidden", "")
   }
-  if full_diff_ready(state, ctx) && !core_diff_ready(state, ctx) {
-    return @html.span(class="review-diff-navigation hidden", "")
-  }
-  let enabled = core_diff_ready(state, ctx) &&
-    state.review_diff_navigation_available
+  let enabled = full_diff_ready(state, ctx) &&
+    review_diff_navigation_enabled(state, ctx)
   @html.div(
     class="review-diff-navigation",
     attrs=@html.Attrs::build()

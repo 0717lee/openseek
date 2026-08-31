@@ -43,8 +43,11 @@ pub fn DiffEditor::is_diff_up_to_date(Self) -> Bool
 pub fn DiffEditor::layout(Self) -> Unit
 pub fn DiffEditor::on_did_update_diff(Self, () -> Unit) -> @common.Disposable
 pub fn DiffEditor::reveal_first_diff(Self) -> Unit
+pub fn DiffEditor::reveal_last_diff(Self) -> Unit
 pub fn DiffEditor::reveal_next_change(Self) -> Bool
+pub fn DiffEditor::reveal_next_change_without_wrap(Self) -> Bool
 pub fn DiffEditor::reveal_previous_change(Self) -> Bool
+pub fn DiffEditor::reveal_previous_change_without_wrap(Self) -> Bool
 pub fn DiffEditor::set_diff_provider(Self, &@diff.DocumentDiffProvider) -> Unit
 pub fn DiffEditor::set_model(Self, DiffEditorModel?) -> DiffEditorModel?
 pub fn DiffEditor::set_scroll_left(Self, Double) -> Unit

@@ -1,4 +1,7 @@
 ///|
+using @cmd {trait Scheduler}
+
+///|
 /// The working-tree document behind Token/Tree's synthetic Modified models.
 /// Historical comparisons and a deleted working file deliberately carry no
 /// live document because current-checkout IDE requests would be misleading.
@@ -19,6 +22,10 @@ pub(all) struct SemanticReviewInput {
   mode : @moon_diff_provider.MoonDiffMode
   ignore_comments : Bool
   ignore_tests : Bool
+  /// The working-tree file comments should name. History has no active review
+  /// target; a deleted working file still does, even though it has no live
+  /// Modified document for language requests.
+  feedback_file : @pathx.Relative?
   live_modified : SemanticReviewLiveDocument?
 } derive(Eq, Debug)
 
@@ -41,7 +48,7 @@ fn semantic_review_input(state : State, ctx : Ctx) -> SemanticReviewInput? {
   guard state.review_diff_mode.semantic_mode() is Some(mode) else {
     return None
   }
-  let (old_name, new_name, old_source, new_source, live_modified) = match
+  let (old_name, new_name, old_source, new_source, feedback_file, live_modified) = match
     ctx.active_history_diff {
     Some(diff) => {
       guard supports_moon_diff(diff.path.0) &&
@@ -55,6 +62,7 @@ fn semantic_review_input(state : State, ctx : Ctx) -> SemanticReviewInput? {
         diff.path.0,
         old_source,
         new_source,
+        None,
         None,
       )
     }
@@ -74,7 +82,7 @@ fn semantic_review_input(state : State, ctx : Ctx) -> SemanticReviewInput? {
         | TabReadFailed(_)
         | TabUnavailable(_) => None
       }
-      (doc.name, doc.name, old_source, new_source, live_modified)
+      (doc.name, doc.name, old_source, new_source, Some(path), live_modified)
     }
   }
   Some({
@@ -85,6 +93,7 @@ fn semantic_review_input(state : State, ctx : Ctx) -> SemanticReviewInput? {
     mode,
     ignore_comments: state.review_diff_ignore_comments,
     ignore_tests: state.review_diff_ignore_tests,
+    feedback_file,
     live_modified,
   })
 }
@@ -449,15 +458,106 @@ priv struct SemanticReviewEditorHost {
   section : @moon_diff_provider.SemanticReviewSection
   old_name : String
   new_name : String
+  feedback_file : @pathx.Relative?
   live_modified : SemanticReviewLiveDocument?
   host : @dom.Element
   editor : @viewer.DiffEditor
   provider : @moon_diff_provider.MoonFragmentDiffProvider?
   subscription : @common.Disposable
+  focus_subscription : @common.Disposable
 }
 
 ///|
 let semantic_review_editors : Map[String, SemanticReviewEditorHost] = Map([])
+
+///|
+let semantic_review_order : Array[String] = []
+
+///|
+let semantic_review_active_key : Ref[String?] = Ref(None)
+
+///|
+priv enum SemanticReviewNavigationDirection {
+  SemanticReviewPrevious
+  SemanticReviewNext
+}
+
+///|
+priv suberror SemanticReviewNavigationSubscription {
+  SemanticReviewNavigationSubscription(@cmd.Emit[Msg])
+}
+
+///|
+fn semantic_review_navigation_sub_loader(
+  payload : Error,
+  scheduler : &Scheduler,
+) -> @sub.RunningSub? {
+  match payload {
+    SemanticReviewNavigationSubscription(dispatch) => {
+      let mut dispatch = dispatch
+      let target = @dom.document().as_event_target()
+      let listener : @dom.Listener = event => {
+        guard event.to_keyboard_event() is Some(keyboard) &&
+          keyboard.key() == "F7" &&
+          @dom.document().get_element_by_id(SemanticReviewHostId).to_option()
+          is Some(host) &&
+          @base_browser.event_target_has_matching_ancestor(
+            event, host, ".semantic-diff-editor-host",
+          ) else {
+          return
+        }
+        // Capture runs before the child DiffEditor performs its own cyclic F7
+        // command, so exactly one aggregate MultiDiff navigation is emitted.
+        event.prevent_default()
+        event.stop_propagation()
+        scheduler.add(
+          dispatch(
+            if keyboard.shift_key() {
+              RevealPreviousReviewDiffChange
+            } else {
+              RevealNextReviewDiffChange
+            },
+          ),
+        )
+      }
+      target.add_event_listener_with_options("keydown", listener, capture=true)
+      Some({
+        unload: _ => {
+          target.remove_event_listener_with_options(
+            "keydown",
+            listener,
+            capture=true,
+          )
+        },
+        update_tagger: payload => {
+          guard payload is SemanticReviewNavigationSubscription(next) else {
+            return
+          }
+          dispatch = next
+        },
+      })
+    }
+    _ => None
+  }
+}
+
+///|
+fn semantic_review_navigation_subscription(
+  state : State,
+  ctx : Ctx,
+  dispatch : @cmd.Emit[Msg],
+) -> @sub.Sub {
+  guard review_diff_navigation_enabled(state, ctx) &&
+    !core_diff_ready(state, ctx) else {
+    return @sub.none
+  }
+  @sub.custom_sub(
+    "fileeditor-semantic-review-navigation",
+    @sub.Local,
+    SemanticReviewNavigationSubscription(dispatch),
+    semantic_review_navigation_sub_loader,
+  )
+}
 
 ///|
 fn update_semantic_review_scroll_width() -> Unit {
@@ -544,6 +644,158 @@ fn semantic_model_uri(side : SemanticReviewSide, key : String) -> @common.Uri? {
 }
 
 ///|
+/// Map one section-local side back into its physical source line domain.
+/// Whole-file fallback keeps full-file coordinates; top-level sections carry
+/// their own old/new ranges, and an absent side remains absent.
+fn semantic_feedback_line_offset(
+  section : @moon_diff_provider.SemanticReviewSection,
+  side : SemanticReviewSide,
+) -> Int? {
+  if section.kind is @moon_diff_provider.SemanticReviewSectionKind::Whole {
+    return Some(0)
+  }
+  let range = match side {
+    SemanticReviewOriginal => section.old_range
+    SemanticReviewModified => section.new_range
+  }
+  match range {
+    Some(range) if range.start_line_number > 0 =>
+      Some(range.start_line_number - 1)
+    _ => None
+  }
+}
+
+///|
+/// Historical sections and physically absent/empty sides must not advertise
+/// the selection-driven feedback UI.
+fn semantic_feedback_side_enabled(
+  feedback_file : @pathx.Relative?,
+  section : @moon_diff_provider.SemanticReviewSection,
+  side : SemanticReviewSide,
+) -> Bool {
+  guard feedback_file is Some(_) &&
+    semantic_feedback_line_offset(section, side) is Some(_) else {
+    return false
+  }
+  match side {
+    SemanticReviewOriginal => !section.original_source.is_empty()
+    SemanticReviewModified => !section.modified_source.is_empty()
+  }
+}
+
+///|
+fn project_semantic_feedback_range(
+  range : @common.Range,
+  line_offset : Int,
+) -> @common.Range {
+  @common.Range(
+    range.start_line_number + line_offset,
+    range.start_column,
+    range.end_line_number + line_offset,
+    range.end_column,
+  )
+}
+
+///|
+/// Preserve the existing full-diff comment contract: Modified feedback owns
+/// an exact working-tree range, while Original feedback retains revision-side
+/// identity without pretending that range exists in the working document.
+fn semantic_feedback_message(
+  file : @pathx.Relative,
+  side : SemanticReviewSide,
+  range : @common.Range,
+  quote : String,
+  comment : String,
+  resource : ModelUri,
+  feedback_id : String,
+) -> Msg {
+  match side {
+    SemanticReviewModified =>
+      EditorCommentAdded(
+        resource~,
+        file~,
+        range~,
+        quote~,
+        comment~,
+        feedback_id~,
+      )
+    SemanticReviewOriginal =>
+      diff_comment_message(
+        file,
+        original_line_number=Some(range.start_line_number),
+        modified_line_number=None,
+        quote~,
+        comment~,
+        resource~,
+        feedback_id~,
+      )
+  }
+}
+
+///|
+priv struct SemanticFeedbackModelProjection {
+  model : @model.TextModel
+  file : @pathx.Relative
+  side : SemanticReviewSide
+  line_offset : Int
+}
+
+///|
+/// Resolve only mounted working-tree semantic models. History and an absent
+/// one-sided model stay non-commentable even though their DiffEditor kernels
+/// still exist for rendering.
+fn semantic_feedback_model_projection(
+  resource : @common.Uri,
+) -> SemanticFeedbackModelProjection? {
+  for _, entry in semantic_review_editors {
+    guard entry.feedback_file is Some(file) &&
+      entry.editor.get_model() is Some(pair) else {
+      continue
+    }
+    for side in [SemanticReviewOriginal, SemanticReviewModified] {
+      guard semantic_feedback_side_enabled(Some(file), entry.section, side) &&
+        semantic_feedback_line_offset(entry.section, side) is Some(line_offset) else {
+        continue
+      }
+      let model = match side {
+        SemanticReviewOriginal => pair.original
+        SemanticReviewModified => pair.modified
+      }
+      if model.uri.to_string() == resource.to_string() {
+        return Some({ model, file, side, line_offset, })
+      }
+    }
+  }
+  None
+}
+
+///|
+fn sync_semantic_feedback(
+  services : DesktopViewerServices,
+  feedback_file : @pathx.Relative?,
+  section : @moon_diff_provider.SemanticReviewSection,
+  original : @model.TextModel,
+  modified : @model.TextModel,
+) -> Unit {
+  services.feedback.set_feedback_enabled(
+    original.uri,
+    semantic_feedback_side_enabled(
+      feedback_file,
+      section,
+      SemanticReviewOriginal,
+    ),
+  )
+  services.feedback.set_feedback_enabled(
+    modified.uri,
+    semantic_feedback_side_enabled(
+      feedback_file,
+      section,
+      SemanticReviewModified,
+    ),
+  )
+}
+
+///|
 /// The semantic model's line numbers are local to one MoonDiff section. Keep
 /// the projection explicit instead of making a fragment impersonate the full
 /// working file: the host IDE receives the real path and global line number,
@@ -558,12 +810,7 @@ priv struct SemanticModifiedModelProjection {
 fn @moon_diff_provider.SemanticReviewSection::modified_line_offset(
   self : @moon_diff_provider.SemanticReviewSection,
 ) -> Int? {
-  match (self.kind, self.new_range) {
-    (@moon_diff_provider.SemanticReviewSectionKind::Whole, _) => Some(0)
-    (_, Some(range)) if range.start_line_number > 0 =>
-      Some(range.start_line_number - 1)
-    _ => None
-  }
+  semantic_feedback_line_offset(self, SemanticReviewModified)
 }
 
 ///|
@@ -720,6 +967,7 @@ fn schedule_semantic_review_editor_resize(key : String) -> Unit {
 ///|
 fn dispose_semantic_review_editor(entry : SemanticReviewEditorHost) -> Unit {
   entry.subscription.dispose()
+  entry.focus_subscription.dispose()
   match entry.editor.set_model(None) {
     Some(previous) => {
       if viewer_state.services is Some(services) {
@@ -727,6 +975,10 @@ fn dispose_semantic_review_editor(entry : SemanticReviewEditorHost) -> Unit {
           DiagnosticsOwner,
           previous.modified.uri,
         )
+        services.feedback.set_feedback_enabled(previous.original.uri, false)
+        services.feedback.set_feedback_enabled(previous.modified.uri, false)
+        services.feedback.clear_feedback(previous.original.uri)
+        services.feedback.clear_feedback(previous.modified.uri)
       }
       dispose_diff_comparison_models(previous)
     }
@@ -805,7 +1057,21 @@ fn create_semantic_review_editor(
   let subscription = editor.on_did_update_diff(() => {
     schedule_semantic_review_editor_resize(key)
   })
+  let focus_listener : @dom.Listener = _ => {
+    semantic_review_active_key.val = Some(key)
+  }
+  host.add_event_listener("focusin", focus_listener)
+  let focus_subscription = @common.Disposable::from(() => {
+    host.remove_event_listener("focusin", focus_listener)
+  })
   editor.set_model(Some(@viewer.DiffEditorModel(original, modified))) |> ignore
+  sync_semantic_feedback(
+    services,
+    input.feedback_file,
+    section,
+    original,
+    modified,
+  )
   sync_semantic_modified_diagnostics(
     services,
     input.live_modified,
@@ -820,11 +1086,13 @@ fn create_semantic_review_editor(
     section,
     old_name: input.old_name,
     new_name: input.new_name,
+    feedback_file: input.feedback_file,
     live_modified: input.live_modified,
     host,
     editor,
     provider,
     subscription,
+    focus_subscription,
   })
 }
 
@@ -880,7 +1148,94 @@ fn clear_semantic_review_editors() -> Unit {
       semantic_review_editors.remove(key)
     }
   }
+  semantic_review_order.clear()
+  semantic_review_active_key.val = None
   update_semantic_review_scroll_width()
+}
+
+///|
+fn semantic_review_navigation_index(current : String?) -> Int {
+  guard current is Some(current) else { return 0 }
+  let index = semantic_review_order.search(current)
+  index.unwrap_or(0)
+}
+
+///|
+/// Move within the focused DiffEditor first, then cycle across Token/Tree
+/// items exactly like VS Code's MultiDiffEditor navigation action.
+fn navigate_semantic_review_change(
+  dispatch : @cmd.Emit[Msg],
+  collapsed : Array[String],
+  direction : SemanticReviewNavigationDirection,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    guard !semantic_review_order.is_empty() else { return }
+    let index = semantic_review_navigation_index(semantic_review_active_key.val)
+    let current = semantic_review_order[index]
+    if !collapsed.contains(current) &&
+      semantic_review_editors.get(current) is Some(entry) {
+      let revealed = match direction {
+        SemanticReviewPrevious =>
+          entry.editor.reveal_previous_change_without_wrap()
+        SemanticReviewNext => entry.editor.reveal_next_change_without_wrap()
+      }
+      if revealed {
+        semantic_review_active_key.val = Some(current)
+        entry.host.scroll_into_view_with_options(
+          block="nearest",
+          inline="nearest",
+        )
+        entry.editor.focus()
+        return
+      }
+    }
+    let target_index = match direction {
+      SemanticReviewPrevious =>
+        if index == 0 {
+          semantic_review_order.length() - 1
+        } else {
+          index - 1
+        }
+      SemanticReviewNext => (index + 1) % semantic_review_order.length()
+    }
+    scheduler.add(
+      dispatch(
+        RevealSemanticReviewSectionChange(
+          semantic_review_order[target_index],
+          direction is SemanticReviewPrevious,
+        ),
+      ),
+    )
+  })
+}
+
+///|
+/// Complete a cross-item navigation after Rabbita has expanded and committed
+/// the destination section.
+fn reveal_semantic_review_section_change(
+  key : String,
+  reveal_last : Bool,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(
+    _scheduler => {
+      guard semantic_review_editors.get(key) is Some(entry) &&
+        @base_browser.element_is_connected(entry.host) else {
+        return
+      }
+      semantic_review_active_key.val = Some(key)
+      entry.host.scroll_into_view_with_options(
+        block="nearest",
+        inline="nearest",
+      )
+      if reveal_last {
+        entry.editor.reveal_last_diff()
+      } else {
+        entry.editor.reveal_first_diff()
+      }
+      entry.editor.focus()
+    },
+    kind=@cmd.after_render,
+  )
 }
 
 ///|
@@ -895,6 +1250,12 @@ fn sync_semantic_review_editors(state : State) -> @cmd.Cmd {
       }
       let desired = semantic_sections(state.semantic_review_plan)
       let desired_keys = desired.map(section => section.key)
+      semantic_review_order.clear()
+      semantic_review_order.append(desired_keys)
+      if semantic_review_active_key.val is Some(key) &&
+        !desired_keys.contains(key) {
+        semantic_review_active_key.val = None
+      }
       let stale = semantic_review_editors
         .to_array()
         .map(pair => pair.0)
@@ -923,6 +1284,7 @@ fn sync_semantic_review_editors(state : State) -> @cmd.Cmd {
             previous.section == section &&
             previous.old_name == input.old_name &&
             previous.new_name == input.new_name &&
+            previous.feedback_file == input.feedback_file &&
             previous.live_modified == input.live_modified &&
             previous.host.is_same_node(host.as_node())
           })

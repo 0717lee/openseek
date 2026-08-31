@@ -287,13 +287,33 @@ pub fn DiffEditor::reveal_first_diff(self : DiffEditor) -> Unit {
 }
 
 ///|
+/// Reveal the final raw diff mapping once the current comparison is ready.
+pub fn DiffEditor::reveal_last_diff(self : DiffEditor) -> Unit {
+  self.widget.reveal_last_diff()
+}
+
+///|
 pub fn DiffEditor::reveal_next_change(self : DiffEditor) -> Bool {
   self.widget.reveal_next_change()
 }
 
 ///|
+/// Reveal the next change only when it remains inside this comparison.
+pub fn DiffEditor::reveal_next_change_without_wrap(self : DiffEditor) -> Bool {
+  self.widget.reveal_next_change_without_wrap()
+}
+
+///|
 pub fn DiffEditor::reveal_previous_change(self : DiffEditor) -> Bool {
   self.widget.reveal_previous_change()
+}
+
+///|
+/// Reveal the previous change only when it remains inside this comparison.
+pub fn DiffEditor::reveal_previous_change_without_wrap(
+  self : DiffEditor,
+) -> Bool {
+  self.widget.reveal_previous_change_without_wrap()
 }
 
 ///|

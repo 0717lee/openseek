@@ -1552,6 +1552,7 @@ pub fn subscriptions(
 ) -> @sub.Sub {
   @sub.batch([
     changes_poll_subscription(state, ctx, dispatch),
+    semantic_review_navigation_subscription(state, ctx, dispatch),
     state.search.subscription(
       ctx.search_input(),
       dispatch.map(msg => Search(msg)),
@@ -2339,18 +2340,53 @@ pub fn update(
     ReviewDiffNavigationAvailabilityChanged(available) =>
       (@cmd.none, { ..state, review_diff_navigation_available: available, })
     RevealPreviousReviewDiffChange => {
-      guard core_diff_ready(state, ctx) &&
-        state.review_diff_navigation_available else {
+      guard review_diff_navigation_enabled(state, ctx) else {
         return (@cmd.none, state)
       }
-      (reveal_previous_review_diff_change(), state)
+      if core_diff_ready(state, ctx) {
+        (reveal_previous_review_diff_change(), state)
+      } else {
+        (
+          navigate_semantic_review_change(
+            dispatch,
+            state.semantic_review_collapsed,
+            SemanticReviewPrevious,
+          ),
+          state,
+        )
+      }
     }
     RevealNextReviewDiffChange => {
-      guard core_diff_ready(state, ctx) &&
-        state.review_diff_navigation_available else {
+      guard review_diff_navigation_enabled(state, ctx) else {
         return (@cmd.none, state)
       }
-      (reveal_next_review_diff_change(), state)
+      if core_diff_ready(state, ctx) {
+        (reveal_next_review_diff_change(), state)
+      } else {
+        (
+          navigate_semantic_review_change(
+            dispatch,
+            state.semantic_review_collapsed,
+            SemanticReviewNext,
+          ),
+          state,
+        )
+      }
+    }
+    RevealSemanticReviewSectionChange(key, reveal_last) => {
+      guard !core_diff_ready(state, ctx) &&
+        semantic_sections(state.semantic_review_plan).any(section => {
+          section.key == key
+        }) else {
+        return (@cmd.none, state)
+      }
+      let semantic_review_collapsed = state.semantic_review_collapsed.filter(collapsed => {
+        collapsed != key
+      })
+      (
+        reveal_semantic_review_section_change(key, reveal_last),
+        { ..state, semantic_review_collapsed, },
+      )
     }
     ToggleReviewProgress => {
       guard ctx.active_file is Some(path) &&

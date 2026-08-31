@@ -100,6 +100,39 @@ test "grouped F7 navigation starts at the modified cursor and wraps" {
 }
 
 ///|
+test "multi-diff navigation detects an item boundary without wrapping" {
+  let state = DiffState::from_diff_result({
+    changes: [
+      diff_state_test_change(2, 3, 2, 3),
+      diff_state_test_change(9, 10, 9, 10),
+    ],
+    additional_alignments: [],
+  })
+  assert_eq(
+    state.next_change_from_modified_line_without_wrap(2).unwrap().change_index,
+    1,
+  )
+  assert_true(state.next_change_from_modified_line_without_wrap(9) is None)
+  assert_eq(
+    state.previous_change_from_modified_line_without_wrap(9).unwrap().change_index,
+    0,
+  )
+  assert_true(state.previous_change_from_modified_line_without_wrap(2) is None)
+}
+
+///|
+test "multi-diff next includes an EOF deletion anchor" {
+  let state = DiffState::from_diff_result({
+    changes: [diff_state_test_change(11, 12, 11, 11)],
+    additional_alignments: [],
+  })
+  assert_eq(
+    state.next_change_from_modified_line_without_wrap(10).unwrap().change_index,
+    0,
+  )
+}
+
+///|
 test "next F7 at the last modified line wraps before an EOF deletion anchor" {
   let state = DiffState::from_diff_result({
     changes: [

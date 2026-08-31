@@ -42,6 +42,9 @@ pub struct DiffEditorWidget {
   /// asynchronous diff computation and hidden/layout render barriers, but a
   /// replacement pair makes it stale instead of moving the new document.
   mut pending_reveal_first_diff_generation : Int?
+  /// Symmetric request used when a multi-diff host enters this item while
+  /// navigating backward.
+  mut pending_reveal_last_diff_generation : Int?
   mut reconciling_generation : Int
   mut is_reconciling : Bool
   /// Cancellable paint barrier for the latest outer layout transaction.
@@ -207,6 +210,7 @@ pub fn DiffEditorWidget::create(
     modified_alignment_geometry: None,
     diff_state: None,
     pending_reveal_first_diff_generation: None,
+    pending_reveal_last_diff_generation: None,
     reconciling_generation: 0,
     is_reconciling: false,
     layout_render_waiters: [],
@@ -1264,11 +1268,13 @@ fn DiffEditorWidget::reconcile_view_model(self : DiffEditorWidget) -> Unit {
     self.view_model.get_model() is Some(model) else {
     self.commit_empty_diff_features(generation)
     self.try_reveal_first_diff()
+    self.try_reveal_last_diff()
     return
   }
   let diff_state = DiffState::from_diff_result(document_diff)
   self.commit_diff_state(diff_state, model, generation)
   self.try_reveal_first_diff()
+  self.try_reveal_last_diff()
 }
 
 ///|
@@ -1304,6 +1310,7 @@ pub fn DiffEditorWidget::set_model(
     return None
   }
   self.pending_reveal_first_diff_generation = None
+  self.pending_reveal_last_diff_generation = None
   self.pending_layout_modified_viewport = None
   self.clear_pending_scroll_echoes()
   self.clear_diff_features_for_transition()
@@ -1640,6 +1647,49 @@ pub fn DiffEditorWidget::reveal_first_diff(self : DiffEditorWidget) -> Unit {
 }
 
 ///|
+/// Consume a deferred final-diff request under the same model/layout fences as
+/// `reveal_first_diff`.
+fn DiffEditorWidget::try_reveal_last_diff(self : DiffEditorWidget) -> Unit {
+  guard self.pending_reveal_last_diff_generation is Some(generation) else {
+    return
+  }
+  if self.editors.committed_model_generation() != generation ||
+    !self.editors.same_model(self.view_model.get_model()) {
+    self.pending_reveal_last_diff_generation = None
+    return
+  }
+  match self.view_model.get_state() {
+    Pending => return
+    NoModel | Failed => {
+      self.pending_reveal_last_diff_generation = None
+      return
+    }
+    Ready => ()
+  }
+  guard self.diff_state is Some(diff_state) else { return }
+  self.pending_reveal_last_diff_generation = None
+  guard !diff_state.mappings.is_empty() else { return }
+  self.reveal_change(
+    diff_state.mappings[diff_state.mappings.length() - 1].line_range_mapping,
+    source="diffEditor.revealLastDiff",
+  )
+  |> ignore
+}
+
+///|
+/// Request a one-shot reveal of the current comparison's final raw mapping.
+/// Multi-diff hosts use this when Shift+F7 crosses into the previous item.
+pub fn DiffEditorWidget::reveal_last_diff(self : DiffEditorWidget) -> Unit {
+  if self.disposed || self.view_model.get_model() is None {
+    return
+  }
+  self.pending_reveal_last_diff_generation = Some(
+    self.editors.committed_model_generation(),
+  )
+  self.try_reveal_last_diff()
+}
+
+///|
 pub fn DiffEditorWidget::reveal_next_change(self : DiffEditorWidget) -> Bool {
   guard self.view_model.get_model() is Some(model) else { return false }
   let current_line = self.editors.modified
@@ -1657,6 +1707,23 @@ pub fn DiffEditorWidget::reveal_next_change(self : DiffEditorWidget) -> Bool {
 }
 
 ///|
+/// Reveal the next change only when it remains inside this comparison. A
+/// multi-diff host uses `false` as the signal to advance to its next item.
+pub fn DiffEditorWidget::reveal_next_change_without_wrap(
+  self : DiffEditorWidget,
+) -> Bool {
+  let current_line = self.editors.modified
+    .get_position()
+    .map_or(1, position => position.line_number)
+  guard self.diff_state is Some(diff_state) &&
+    diff_state.next_change_from_modified_line_without_wrap(current_line)
+    is Some(target) else {
+    return false
+  }
+  self.reveal_navigation_target(target)
+}
+
+///|
 pub fn DiffEditorWidget::reveal_previous_change(
   self : DiffEditorWidget,
 ) -> Bool {
@@ -1665,6 +1732,22 @@ pub fn DiffEditorWidget::reveal_previous_change(
     .map_or(1, position => position.line_number)
   guard self.diff_state is Some(diff_state) &&
     diff_state.previous_change_from_modified_line(current_line) is Some(target) else {
+    return false
+  }
+  self.reveal_navigation_target(target)
+}
+
+///|
+/// Reveal the previous change only when it remains inside this comparison.
+pub fn DiffEditorWidget::reveal_previous_change_without_wrap(
+  self : DiffEditorWidget,
+) -> Bool {
+  let current_line = self.editors.modified
+    .get_position()
+    .map_or(1, position => position.line_number)
+  guard self.diff_state is Some(diff_state) &&
+    diff_state.previous_change_from_modified_line_without_wrap(current_line)
+    is Some(target) else {
     return false
   }
   self.reveal_navigation_target(target)
@@ -1823,6 +1906,7 @@ pub fn DiffEditorWidget::dispose(self : DiffEditorWidget) -> Unit {
   self.modified_alignment_geometry = None
   self.diff_state = None
   self.pending_reveal_first_diff_generation = None
+  self.pending_reveal_last_diff_generation = None
   self.reconciling_generation = 0
   self.is_reconciling = false
   self.layout_render_generation = 0

@@ -351,6 +351,27 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           guard event.feedback.kind is @agent_feedback_api.UserReview else {
             return
           }
+          if semantic_feedback_model_projection(event.feedback.resource)
+            is Some(projection) {
+            let range = project_semantic_feedback_range(
+              event.feedback.range,
+              projection.line_offset,
+            )
+            scheduler.add(
+              dispatch(
+                semantic_feedback_message(
+                  projection.file,
+                  projection.side,
+                  range,
+                  projection.model.get_value_in_range(event.feedback.range),
+                  event.feedback.text,
+                  ModelUri(event.feedback.resource.to_string()),
+                  event.feedback.id,
+                ),
+              ),
+            )
+            return
+          }
           guard viewer_state.relative is Some(file) else { return }
           // The modified pane and code source use the same live URI. Rich
           // Markdown detaches that source Viewer, so resolve the modified diff

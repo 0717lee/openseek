@@ -846,6 +846,9 @@ pub(all) enum Msg {
   ReviewDiffNavigationAvailabilityChanged(Bool)
   RevealPreviousReviewDiffChange
   RevealNextReviewDiffChange
+  // Continue multi-diff navigation in another Token/Tree section. `true`
+  // reveals the final change when moving backward; `false` reveals the first.
+  RevealSemanticReviewSectionChange(String, Bool)
   // Mark the active changed-file review as reviewed, or return it to the
   // unreviewed queue. Ordinary file tabs ignore the action.
   ToggleReviewProgress

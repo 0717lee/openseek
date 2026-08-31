@@ -16,6 +16,7 @@ fn semantic_test_input(
     mode,
     ignore_comments: true,
     ignore_tests: true,
+    feedback_file: None,
     live_modified: None,
   }
 }
@@ -228,11 +229,20 @@ test "semantic input follows active MoonBit review and ignores layout" {
   assert_eq(input.old_source, "fn value() { 1 }")
   assert_eq(input.new_source, "fn value() { 2 }")
   assert_true(input.mode is @moon_diff_provider.Token)
+  assert_eq(input.feedback_file, Some(path))
   assert_true(
     input.live_modified is Some({ resource, path: live_path, }) &&
     resource.path == "/work/src/main.mbt" &&
     live_path == path,
   )
+  let deleted_docs = docs.copy()
+  deleted_docs[path] = { ..docs[path], state: TabDeleted, }
+  guard semantic_review_input({ ..state, docs: deleted_docs, }, ctx)
+    is Some(deleted_input) else {
+    fail("expected deleted semantic review input")
+  }
+  assert_eq(deleted_input.feedback_file, Some(path))
+  assert_eq(deleted_input.live_modified, None)
   assert_eq(
     semantic_review_input({ ..state, review_diff_mode: ReviewDiffCore, }, ctx),
     None,
@@ -250,6 +260,141 @@ test "semantic model identity enables IDE only on Modified" {
   assert_eq(modified.scheme, SemanticReviewModifiedScheme)
   assert_eq(original.path, "/section-3.mbt")
   assert_eq(modified.path, "/section-3.mbt")
+}
+
+///|
+test "semantic feedback enables only physical sides of working-tree sections" {
+  let file = @pathx.Relative("src/main.mbt")
+  let matched = semantic_test_section(
+    "section-1",
+    Some(1),
+    @moon_diff_provider.SemanticReviewSectionKind::Matched,
+    "old",
+    "new",
+  )
+  assert_true(
+    semantic_feedback_side_enabled(Some(file), matched, SemanticReviewOriginal),
+  )
+  assert_true(
+    semantic_feedback_side_enabled(Some(file), matched, SemanticReviewModified),
+  )
+  assert_false(
+    semantic_feedback_side_enabled(None, matched, SemanticReviewOriginal),
+  )
+  let deleted = {
+    ..matched,
+    kind: @moon_diff_provider.SemanticReviewSectionKind::Deleted,
+    new_range: None,
+    modified_source: "",
+  }
+  assert_true(
+    semantic_feedback_side_enabled(Some(file), deleted, SemanticReviewOriginal),
+  )
+  assert_false(
+    semantic_feedback_side_enabled(Some(file), deleted, SemanticReviewModified),
+  )
+  let inserted = {
+    ..matched,
+    kind: @moon_diff_provider.SemanticReviewSectionKind::Inserted,
+    old_range: None,
+    original_source: "",
+  }
+  assert_false(
+    semantic_feedback_side_enabled(Some(file), inserted, SemanticReviewOriginal),
+  )
+  assert_true(
+    semantic_feedback_side_enabled(Some(file), inserted, SemanticReviewModified),
+  )
+}
+
+///|
+test "semantic feedback projects local ranges into each physical source side" {
+  let section = semantic_test_section(
+    "section-2",
+    Some(2),
+    @moon_diff_provider.SemanticReviewSectionKind::Matched,
+    "old one\nold two",
+    "new one\nnew two",
+  )
+  assert_eq(
+    semantic_feedback_line_offset(section, SemanticReviewOriginal),
+    Some(9),
+  )
+  assert_eq(
+    semantic_feedback_line_offset(section, SemanticReviewModified),
+    Some(29),
+  )
+  let local_range = @common.Range(1, 2, 2, 5)
+  assert_eq(
+    project_semantic_feedback_range(local_range, 9),
+    @common.Range(10, 2, 11, 5),
+  )
+  assert_eq(
+    project_semantic_feedback_range(local_range, 29),
+    @common.Range(30, 2, 31, 5),
+  )
+  let whole = {
+    ..section,
+    key: "whole",
+    identity: None,
+    kind: @moon_diff_provider.SemanticReviewSectionKind::Whole,
+    old_range: None,
+    new_range: None,
+  }
+  assert_eq(
+    semantic_feedback_line_offset(whole, SemanticReviewOriginal),
+    Some(0),
+  )
+  assert_eq(
+    semantic_feedback_line_offset(whole, SemanticReviewModified),
+    Some(0),
+  )
+}
+
+///|
+test "semantic feedback messages preserve projected side and range identity" {
+  let file = @pathx.Relative("src/main.mbt")
+  let resource = ModelUri("openseek-semantic-diff-modified:/section-2.mbt")
+  let modified = semantic_feedback_message(
+    file,
+    SemanticReviewModified,
+    @common.Range(30, 2, 31, 5),
+    "new one\nnew two",
+    "keep this",
+    resource,
+    "feedback-modified",
+  )
+  assert_true(
+    modified
+    is EditorCommentAdded(
+      file=@pathx.Relative("src/main.mbt"),
+      range=modified_range,
+      quote="new one\nnew two",
+      comment="keep this",
+      ..
+    ) &&
+    modified_range == @common.Range(30, 2, 31, 5),
+  )
+  let original = semantic_feedback_message(
+    file,
+    SemanticReviewOriginal,
+    @common.Range(10, 2, 11, 5),
+    "old one\nold two",
+    "restore this",
+    ModelUri("openseek-semantic-diff-original:/section-2.mbt"),
+    "feedback-original",
+  )
+  assert_true(
+    original
+    is DiffCommentAdded(
+      file=@pathx.Relative("src/main.mbt"),
+      original_line_number=Some(10),
+      modified_line_number=None,
+      quote="old one\nold two",
+      comment="restore this",
+      ..
+    ),
+  )
 }
 
 ///|
