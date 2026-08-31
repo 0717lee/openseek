@@ -3,8 +3,21 @@
 // `FoldingModel` (regions + their tracking editor decorations + the change
 // emitter) and the reachable collapse-state helpers the commands drive.
 //
-// Omissions: `getMemento`/`applyMemento`/`_getLinesChecksum` (view-state
-// persistence has no consumer in the readonly viewer).
+// The persistence slice (`getMemento`/`applyMemento`/`_getLinesChecksum`) is
+// retained because readonly hosts replace or flush models when disk contents
+// change and must restore the user's fold choices afterward.
+
+///|
+/// One persisted fold range — Monaco's private `ILineMemento`
+/// (`foldingModel.ts:21`). Optional fields retain the source's compatibility
+/// defaults even though states produced by this version fill all three.
+priv struct FoldingLineMemento {
+  start_line_number : Int
+  end_line_number : Int
+  checksum : Int?
+  is_collapsed : Bool?
+  source : FoldSource?
+} derive(Debug)
 
 ///|
 /// The exact decoration capabilities `FoldingModel` writes through — Monaco's
@@ -275,6 +288,98 @@ fn FoldingModel::current_folded_or_manual_ranges(
     }
   }
   folded_ranges
+}
+
+///|
+/// `getMemento` (`foldingModel.ts:188-210`): persist collapsed provider ranges
+/// and every manual range. Expanded provider ranges are deliberately omitted;
+/// a newly computed folding model starts expanded, then `apply_memento`
+/// reapplies only the saved exceptions.
+fn FoldingModel::get_memento(self : FoldingModel) -> Array[FoldingLineMemento]? {
+  let folded_or_manual_ranges = self.current_folded_or_manual_ranges()
+  let result : Array[FoldingLineMemento] = []
+  let max_line_number = self.text_model.get_line_count()
+  for range in folded_or_manual_ranges {
+    if range.start_line_number >= range.end_line_number ||
+      range.start_line_number < 1 ||
+      range.end_line_number > max_line_number {
+      continue
+    }
+    result.push({
+      start_line_number: range.start_line_number,
+      end_line_number: range.end_line_number,
+      is_collapsed: Some(range.is_collapsed),
+      source: Some(range.source),
+      checksum: Some(
+        self.get_lines_checksum(
+          range.start_line_number + 1,
+          range.end_line_number,
+        ),
+      ),
+    })
+  }
+  if result.is_empty() {
+    None
+  } else {
+    Some(result)
+  }
+}
+
+///|
+/// `applyMemento` (`foldingModel.ts:212-239`): validate persisted ranges
+/// against the current document before merging them with freshly computed
+/// provider ranges. A changed boundary checksum drops only that stale range.
+fn FoldingModel::apply_memento(
+  self : FoldingModel,
+  state : Array[FoldingLineMemento],
+) -> Unit {
+  let ranges_to_restore : Array[FoldRange] = []
+  let max_line_number = self.text_model.get_line_count()
+  for range in state {
+    if range.start_line_number >= range.end_line_number ||
+      range.start_line_number < 1 ||
+      range.end_line_number > max_line_number {
+      continue
+    }
+    let checksum = self.get_lines_checksum(
+      range.start_line_number + 1,
+      range.end_line_number,
+    )
+    if range.checksum is None || range.checksum == Some(checksum) {
+      ranges_to_restore.push({
+        start_line_number: range.start_line_number,
+        end_line_number: range.end_line_number,
+        type_: None,
+        is_collapsed: range.is_collapsed.unwrap_or(true),
+        source: range.source.unwrap_or(Provider),
+      })
+    }
+  }
+  let new_ranges = FoldingRegions::sanitize_and_merge(
+    Regions(self.regions),
+    Ranges(ranges_to_restore),
+    Some(max_line_number),
+  )
+  self.update_post(FoldingRegions::from_fold_ranges(new_ranges))
+}
+
+///|
+/// `_getLinesChecksum` (`foldingModel.ts:241-245`) with the pinned
+/// `base/common/hash.ts` string hash: seed `149417`, then multiply by 31 and
+/// add each UTF-16 code unit. Six decimal digits are sufficient for rejecting
+/// stale persisted ranges.
+fn FoldingModel::get_lines_checksum(
+  self : FoldingModel,
+  line_number_1 : Int,
+  line_number_2 : Int,
+) -> Int {
+  let text = self.text_model.get_line_content(line_number_1) +
+    self.text_model.get_line_content(line_number_2)
+  let mut hash = 149417
+  for code_unit in text.code_units() {
+    hash = hash * 31 + code_unit.to_int()
+  }
+  hash % 1000000
 }
 
 ///|

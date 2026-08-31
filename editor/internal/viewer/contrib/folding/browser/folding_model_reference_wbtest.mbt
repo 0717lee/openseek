@@ -298,6 +298,53 @@ test "collapse" {
 }
 
 ///|
+/// Persistence port of `FoldingModel.getMemento`/`applyMemento` at the pinned
+/// VS Code revision. Expanded provider ranges are represented by absence;
+/// collapsed siblings are restored after a fresh folding model is computed.
+test "folding memento restores only collapsed provider ranges" {
+  let lines = [
+    "class A {", "  first();", "}", "class B {", "  second();", "}", "tail",
+  ]
+  let before = test_folding_model(lines)
+  set_collapse_state_at_level(before, 1, true, [])
+  guard before.get_region_at_line(1) is Some(first) else {
+    fail("expected first top-level region")
+  }
+  before.toggle_collapse_state([first])
+  assert_folded_ranges(before, [(4, 5)], "saved state")
+  guard before.get_memento() is Some(memento) else {
+    fail("expected collapsed range memento")
+  }
+
+  let after = test_folding_model(lines)
+  after.apply_memento(memento)
+  assert_model_ranges(after, [(1, 2, false), (4, 5, true)], "restored state")
+}
+
+///|
+/// The persisted checksum rejects a range whose body boundary changed instead
+/// of applying stale line coordinates to a different fold.
+test "folding memento rejects a stale range checksum" {
+  let before = test_folding_model([
+    "class A {", "  first();", "}", "class B {", "  second();", "}", "tail",
+  ])
+  set_collapse_state_at_level(before, 1, true, [])
+  guard before.get_memento() is Some(memento) else {
+    fail("expected collapsed range memento")
+  }
+
+  let after = test_folding_model([
+    "class A {", "  changed();", "}", "class B {", "  second();", "}", "tail",
+  ])
+  after.apply_memento(memento)
+  assert_model_ranges(
+    after,
+    [(1, 2, false), (4, 5, true)],
+    "only checksum-compatible range restored",
+  )
+}
+
+///|
 test "getRegionsInside" {
   let folding_model = test_folding_model([
     "/**", " * Comment", " */", "class A {", "  void foo() {", "    // comment {",

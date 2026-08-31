@@ -42,10 +42,13 @@ pub(all) struct FoldingController {
   mut folding_decoration_provider : FoldingDecorationProvider?
   mut range_provider : IndentRangeProvider?
   mut mouse_down_info : FoldingMouseDownInfo?
+  mut restoring_view_state : Bool
   local_to_dispose : Array[@common.Disposable]
 }
 pub fn FoldingController::FoldingController() -> Self
 pub fn FoldingController::clear_local(Self) -> Unit
+pub fn FoldingController::restore_view_state(Self, FoldingStateMemento) -> Unit
+pub fn FoldingController::save_view_state(Self) -> FoldingStateMemento?
 
 type FoldingDecorationAccess
 
@@ -86,6 +89,8 @@ pub fn FoldingRegions::from_fold_ranges(Array[FoldRange]) -> Self
 pub fn FoldingRegions::get_type(Self, Int) -> String?
 pub fn FoldingRegions::length(Self) -> Int
 pub fn FoldingRegions::to_fold_range(Self, Int) -> FoldRange
+
+type FoldingStateMemento derive(@debug.Debug)
 
 type HiddenRangeModel
 pub fn HiddenRangeModel::HiddenRangeModel(FoldingModel) -> Self

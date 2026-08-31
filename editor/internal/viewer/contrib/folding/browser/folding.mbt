@@ -12,9 +12,19 @@
 // the internal folding package independent of the root Viewer.
 //
 // Omissions: the syntax range provider (`SyntaxRangeProvider` — no folding
-// range providers in the language registry yet), view-state save/restore
-// (`FoldingStateMemento`), `foldingImportsByDefault` (needs provider kinds),
-// and the update `Delayer`/debounce (the viewer computes synchronously).
+// range providers in the language registry yet), `foldingImportsByDefault`
+// (needs provider kinds), and the update `Delayer`/debounce (the viewer
+// computes synchronously). Folding view-state persistence is retained.
+
+///|
+/// The supported subset of Monaco's `FoldingStateMemento`
+/// (`folding.ts:54-59`). Provider identity and folded-import state are absent
+/// with those unported features; `line_count` remains part of the persisted
+/// shape for source fidelity.
+struct FoldingStateMemento {
+  collapsed_regions : Array[FoldingLineMemento]?
+  line_count : Int?
+} derive(Debug)
 
 ///|
 /// Receives how many ranges a provider computed and whether the limit
@@ -75,6 +85,7 @@ pub(all) struct FoldingController {
   mut folding_decoration_provider : FoldingDecorationProvider?
   mut range_provider : IndentRangeProvider?
   mut mouse_down_info : FoldingMouseDownInfo?
+  mut restoring_view_state : Bool
   /// The model-scoped subscriptions of `localToDispose`.
   local_to_dispose : Array[@base_common.Disposable]
 }
@@ -89,8 +100,40 @@ pub fn FoldingController::FoldingController() -> FoldingController {
     folding_decoration_provider: None,
     range_provider: None,
     mouse_down_info: None,
+    restoring_view_state: false,
     local_to_dispose: [],
   }
+}
+
+///|
+/// `saveViewState` (`folding.ts:188-202`) reduced to the supported folding
+/// state. `None` means no live folding model was available.
+pub fn FoldingController::save_view_state(
+  self : FoldingController,
+) -> FoldingStateMemento? {
+  guard self.folding_model is Some(folding_model) else { return None }
+  Some({
+    collapsed_regions: folding_model.get_memento(),
+    line_count: Some(folding_model.text_model().get_line_count()),
+  })
+}
+
+///|
+/// `restoreViewState` (`folding.ts:204-225`). The restoring flag prevents the
+/// hidden-range listener from moving a selection while persisted folds are
+/// being applied.
+pub fn FoldingController::restore_view_state(
+  self : FoldingController,
+  state : FoldingStateMemento,
+) -> Unit {
+  guard state.collapsed_regions is Some(collapsed_regions) &&
+    !collapsed_regions.is_empty() &&
+    self.folding_model is Some(folding_model) else {
+    return
+  }
+  self.restoring_view_state = true
+  folding_model.apply_memento(collapsed_regions)
+  self.restoring_view_state = false
 }
 
 ///|
@@ -121,4 +164,5 @@ pub fn FoldingController::clear_local(self : FoldingController) -> Unit {
   self.range_provider = None
   self.folding_decoration_provider = None
   self.mouse_down_info = None
+  self.restoring_view_state = false
 }
