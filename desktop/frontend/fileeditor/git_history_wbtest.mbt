@@ -107,6 +107,28 @@ test "Review tree renders VS Code-style Git Graph and inline commit files" {
 }
 
 ///|
+test "active historical diff highlights its commit file row" {
+  let diff : @dock.GitHistoryDiff = {
+    commit: "1111111111111111111111111111111111111111",
+    parent: Some("2222222222222222222222222222222222222222"),
+    path: @pathx.Relative("src/main.mbt"),
+    original_path: None,
+    status: "modified",
+    kind: "file",
+  }
+  let ctx = {
+    ..test_ctx(),
+    open_history_diffs: [diff],
+    active_history_diff: Some(diff),
+  }
+  let html = render_review_html(
+    tree_pane(test_emit(), graph_fixture_state(), ctx),
+  )
+  assert_true(html.contains("class=\"git-history-file selected\""))
+  assert_true(html.contains("aria-current=\"page\""))
+}
+
+///|
 test "Git graph SVG ports VS Code merge and duplicate-lane curves" {
   let merge = render_review_html(
     git_graph_cell(
