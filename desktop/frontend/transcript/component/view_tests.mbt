@@ -179,9 +179,8 @@ test "durable assistant sequences render as separate foldable steps" {
   let children = renderer.stream_children()
   let keys = children.to_array().map(pair => pair.0)
   assert_eq(keys, [
-    "row\u{0}s1\u{0}o0", "rule\u{0}s1\u{0}o0", "row\u{0}s2\u{0}o1",
-    "activity\u{0}after\u{0}s1\u{0}o0", "activity\u{0}after\u{0}s2\u{0}o1",
-    "row\u{0}s4\u{0}o2", "activity\u{0}after\u{0}s3\u{0}o0",
+    "row\u{0}s1\u{0}o0", "rule\u{0}s1\u{0}o0", "row\u{0}s2\u{0}o1", "activity\u{0}after\u{0}s1\u{0}o0",
+    "activity\u{0}after\u{0}s2\u{0}o1", "row\u{0}s4\u{0}o2", "activity\u{0}after\u{0}s3\u{0}o0",
   ])
   let first_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
@@ -258,8 +257,7 @@ test "a durable step with prose and tool calls renders its prose first" {
     } : TranscriptRenderer).stream_children()
   let keys = children.to_array().map(pair => pair.0)
   assert_eq(keys, [
-    "row\u{0}s1\u{0}o0", "rule\u{0}s1\u{0}o0", "row\u{0}s2\u{0}o0",
-    "activity\u{0}after\u{0}s1\u{0}o0",
+    "row\u{0}s1\u{0}o0", "rule\u{0}s1\u{0}o0", "row\u{0}s2\u{0}o0", "activity\u{0}after\u{0}s1\u{0}o0",
   ])
   let activity_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
@@ -451,9 +449,8 @@ test "an ambiguous commit-first prefix keeps live reasoning visible" {
     } : TranscriptRenderer).stream_children()
   let keys = children.to_array().map(pair => pair.0)
   assert_eq(keys, [
-    "row\u{0}s1\u{0}o0", "rule\u{0}s1\u{0}o0", "row\u{0}s2\u{0}o1",
-    "activity\u{0}after\u{0}s1\u{0}o0", "row\u{0}s3\u{0}o1",
-    "activity\u{0}after\u{0}s2\u{0}o1", "activity\u{0}after\u{0}s3\u{0}o1",
+    "row\u{0}s1\u{0}o0", "rule\u{0}s1\u{0}o0", "row\u{0}s2\u{0}o1", "activity\u{0}after\u{0}s1\u{0}o0",
+    "row\u{0}s3\u{0}o1", "activity\u{0}after\u{0}s2\u{0}o1", "activity\u{0}after\u{0}s3\u{0}o1",
   ])
   let markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
