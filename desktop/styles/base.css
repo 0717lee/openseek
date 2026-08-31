@@ -262,6 +262,10 @@ html {
 }
 
 .app {
+  /* Vertical and horizontal resize handles share one hit-area size per axis.
+     Component styles consume the dimension that matches their seam. */
+  --resize-handle-width: 6px;
+  --resize-handle-height: 6px;
   display: grid;
   /* The sidebar track reads `--sidebar-width`, set as the user drags the
      handle on the aside's right edge (see frontend/sidebar_resize.mbt); it
