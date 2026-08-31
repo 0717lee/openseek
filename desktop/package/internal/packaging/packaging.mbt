@@ -1270,6 +1270,19 @@ async test "form field focus styling stays in the base stylesheet" {
 }
 
 ///|
+async test "Windows overlay chrome keeps drag, caption, and compact-row contracts" {
+  let css = assembled_app_stylesheet(locate_workspace())
+  for
+    fragment in [
+      ".app.native-titlebar-overlay .sidebar-header", "-webkit-app-region: drag",
+      "-webkit-app-region: no-drag", ".app.native-windows-titlebar", "--native-titlebar-height: 40px",
+      "--native-titlebar-caption-inset: 150px",
+    ] {
+    assert_true(css.contains(fragment))
+  }
+}
+
+///|
 /// An uncaught `PackageError` reaches the user through the async runtime's
 /// `println(err : Error)`; this pins that the message survives that path
 /// (the intrinsic falls back to the bare constructor name without the Show

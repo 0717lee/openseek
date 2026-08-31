@@ -4,20 +4,14 @@
 // between the left sidebar, conversation topbar, and expanded editor strip.
 
 ///|
-const WindowTitlebarSelector = ".sidebar-header, .topbar, .editor-tabsbar"
+const WindowTitlebarSelector = ".sidebar-header, .topbar, .editor-tabsbar, .window-titlebar-drag-strip"
 
 ///|
-const WindowTitlebarPageSelector = ".window-titlebar-page"
-
-///|
-const WindowTitlebarExcludedSelector = "button, a, input, textarea, select, [role=button], .editor-tab, .dock-menu"
-
-///|
-const WindowTitlebarPageHeight = 46
+const WindowTitlebarExcludedSelector = "button, a, input, textarea, select, [role=button], [contenteditable=true], .editor-tab, .dock-menu"
 
 ///|
 fn window_titlebar_platform_supports_overlay(platform : String) -> Bool {
-  browser_platform_is_apple(platform) || platform.to_lower().has_prefix("win")
+  browser_platform_is_apple(platform) || browser_platform_is_windows(platform)
 }
 
 ///|
@@ -26,19 +20,42 @@ fn window_titlebar_overlay_supported() -> Bool {
 }
 
 ///|
-fn is_window_titlebar_double_click_target(
-  element : @dom.Element,
-  client_y : Int,
+fn window_titlebar_drag_strip_visible(
+  page_without_topbar : Bool,
+  is_desktop : Bool,
+  platform : String,
 ) -> Bool {
+  page_without_topbar &&
+  is_desktop &&
+  window_titlebar_platform_supports_overlay(platform)
+}
+
+///|
+fn is_window_titlebar_double_click_target(element : @dom.Element) -> Bool {
   if element.closest(WindowTitlebarExcludedSelector) is Some(_) {
     return false
   }
-  element.closest(WindowTitlebarSelector) is Some(_) ||
-  (
-    client_y < WindowTitlebarPageHeight &&
-    element.closest(WindowTitlebarPageSelector) is Some(_)
-  )
+  element.closest(WindowTitlebarSelector) is Some(_)
 }
+
+///|
+/// CEF needs the initial drag region assigned after the DOM exists. Repeating
+/// this during subscription reconciliation also covers a topbar replaced by a
+/// page transition; CSS remains the steady-state declaration.
+extern "js" fn install_window_titlebar_drag_regions() -> Unit =
+  #| () => {
+  #|   const roots = document.querySelectorAll(
+  #|     ".sidebar-header, .topbar, .editor-tabsbar, .window-titlebar-drag-strip",
+  #|   );
+  #|   const excluded =
+  #|     "button, a, input, textarea, select, [role=button], [contenteditable=true], .editor-tab, .dock-menu";
+  #|   for (const root of roots) {
+  #|     root.style.webkitAppRegion = "drag";
+  #|     for (const control of root.querySelectorAll(excluded)) {
+  #|       control.style.webkitAppRegion = "no-drag";
+  #|     }
+  #|   }
+  #| }
 
 ///|
 priv suberror WindowTitlebarSubscription {
@@ -54,11 +71,12 @@ fn window_titlebar_sub_loader(
     WindowTitlebarSubscription(emit) => {
       let mut emit = emit
       let target = @dom.document().as_event_target()
+      install_window_titlebar_drag_regions()
       let listener : @dom.Listener = event => {
         guard event.to_mouse_event() is Some(mouse) &&
           mouse.get_button() == 0 &&
           event.target().to_element() is Some(element) &&
-          is_window_titlebar_double_click_target(element, mouse.get_client_y()) else {
+          is_window_titlebar_double_click_target(element) else {
           return
         }
         // A title or workspace label is text in the DOM, but within window
@@ -78,6 +96,7 @@ fn window_titlebar_sub_loader(
         update_tagger: payload => {
           guard payload is WindowTitlebarSubscription(next) else { return }
           emit = next
+          install_window_titlebar_drag_regions()
         },
       })
     }

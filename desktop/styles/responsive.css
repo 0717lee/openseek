@@ -137,6 +137,29 @@
     min-width: 44px;
     min-height: 44px;
   }
+  /* A narrow Windows desktop window still shares its first row with native
+     caption buttons. Keep that row compact instead of applying phone touch
+     geometry that would make native and web chrome diverge. */
+  .app.native-windows-titlebar main {
+    --topbar-height: var(--native-titlebar-height);
+  }
+  .app.native-windows-titlebar .topbar,
+  .app.native-windows-titlebar .sidebar-header,
+  .app.native-windows-titlebar .editor-tabsbar {
+    height: var(--native-titlebar-height);
+  }
+  .app.native-windows-titlebar .topbar-toggle,
+  .app.native-windows-titlebar .panel-toggle {
+    min-width: 32px;
+    min-height: 32px;
+  }
+  .app.native-windows-titlebar.sidebar-collapsed .page-sidebar-toggle,
+  .app.native-windows-titlebar.sidebar-collapsed
+    .content.panel-expanded
+    .topbar
+    > .topbar-toggle {
+    top: 4px;
+  }
   button.secondary,
   button.primary:not(.sidebar-button),
   a.setting-link,

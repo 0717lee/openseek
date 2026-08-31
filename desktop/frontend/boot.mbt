@@ -93,6 +93,11 @@ fn browser_platform_is_apple(platform : String) -> Bool {
 }
 
 ///|
+fn browser_platform_is_windows(platform : String) -> Bool {
+  platform.to_lower().has_prefix("win")
+}
+
+///|
 fn app_shortcut_platform_is_apple() -> Bool {
   browser_platform_is_apple(app_shortcut_browser_platform())
 }

@@ -1874,16 +1874,24 @@ fn console_gate_view(
 }
 
 ///|
-/// Root shell classes keep platform chrome geometry explicit in CSS. Only the
-/// native Apple window uses Proton's left-side traffic-light overlay; browser
-/// pages and non-Apple desktop shells retain the ordinary header insets.
-fn app_shell_class(sidebar_open : Bool, native_apple_titlebar : Bool) -> String {
+/// Root shell classes keep platform chrome geometry explicit in CSS. Browser
+/// pages and Linux retain ordinary header geometry; native Apple and Windows
+/// windows expose the distinct control reserves their overlays require.
+fn app_shell_class(
+  sidebar_open : Bool,
+  is_desktop : Bool,
+  platform : String,
+) -> String {
   let classes : Array[String] = ["app"]
   if !sidebar_open {
     classes.push("sidebar-collapsed")
   }
-  if native_apple_titlebar {
+  if is_desktop && browser_platform_is_apple(platform) {
+    classes.push("native-titlebar-overlay")
     classes.push("native-apple-titlebar")
+  } else if is_desktop && browser_platform_is_windows(platform) {
+    classes.push("native-titlebar-overlay")
+    classes.push("native-windows-titlebar")
   }
   classes.join(" ")
 }
@@ -1952,6 +1960,11 @@ fn view(
     Skills | Settings | WorkspaceSettings(..) => true
     Codex => false
   }
+  let window_titlebar_drag_strip = window_titlebar_drag_strip_visible(
+    window_titlebar_page,
+    model.is_desktop,
+    app_shortcut_browser_platform(),
+  )
   let content = match model.screen {
     // The one fork that decides what the conversation column is. A chat needs
     // a conversation, and a conversation needs a project to work in, so with
@@ -2018,12 +2031,21 @@ fn view(
   if terminal_panel_visible {
     content_class += " terminal-open"
   }
+  let page_content = if window_titlebar_drag_strip {
+    [@html.div(class="window-titlebar-drag-strip", @html.nothing), ..content]
+  } else {
+    content
+  }
   let children : Array[@html.Html] = [
     sidebar_html,
     @html.div(class=content_class, [
       @html.main_(
-        class=if window_titlebar_page { "window-titlebar-page" } else { "" },
-        content,
+        class=if window_titlebar_drag_strip {
+          "window-titlebar-page"
+        } else {
+          ""
+        },
+        page_content,
       ),
       right_panel_html,
       terminal_html,
@@ -2087,7 +2109,8 @@ fn view(
   @html.div(
     class=app_shell_class(
       model.sidebar_open,
-      model.is_desktop && app_shortcut_platform_is_apple(),
+      model.is_desktop,
+      app_shortcut_browser_platform(),
     ),
     children,
   )

@@ -71,6 +71,10 @@ pub fn AppInfoReply::not_equal(Self, Self) -> Bool
 pub fn AppInfoReply::to_json(Self) -> Json
 pub fn AppInfoReply::to_repr(Self) -> @debug.Repr
 
+pub(all) struct AppTitlebarThemePayload {
+  dark : Bool
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
 pub(all) struct ApplyUpdateReply {
   applied : Bool
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
