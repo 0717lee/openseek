@@ -14,6 +14,27 @@ aside {
   border-right: 1px solid var(--color-separator);
   background: var(--color-bg-surface);
   color: var(--color-text-secondary);
+  /* The width-resize grab strip on the right edge positions against the
+     aside itself. */
+  position: relative;
+}
+
+/* Drag-to-resize handle on the sidebar's right edge. A thin strip floated
+   above the seam with a col-resize cursor; it tints on hover and while
+   dragging. Wired imperatively by frontend/sidebar_resize.mbt; the narrow
+   layout hides it with the other resize handles. */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: var(--resize-handle-width);
+  z-index: 3;
+  cursor: col-resize;
+}
+.sidebar-resize-handle:hover,
+html.is-resizing .sidebar-resize-handle {
+  background: var(--color-accent-soft);
 }
 
 /* The sidebar's own 46px header, matching the topbar so the sidebar

@@ -1784,6 +1784,7 @@ fn update_msg(
               // `BridgeReady`.
               clear_legacy_engine_settings(),
               watch_color_scheme(dispatch),
+              request_sidebar_resize_mount(),
             ]),
             model,
           )
@@ -1793,6 +1794,7 @@ fn update_msg(
               load_saved_settings(dispatch),
               watch_color_scheme(dispatch),
               rotate_session(dispatch, model.focused),
+              request_sidebar_resize_mount(),
             ]),
             model,
           )

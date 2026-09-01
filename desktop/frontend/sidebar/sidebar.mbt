@@ -7,6 +7,12 @@ pub(all) struct Account {
 } derive(Debug, Eq)
 
 ///|
+/// The id of the grab strip the sidebar renders on its right edge. The
+/// shell's sidebar resize (desktop/frontend/sidebar_resize.mbt) finds the
+/// handle by this id to install its drag listeners.
+pub const ResizeHandleId : String = "sidebar-resize-handle"
+
+///|
 /// The complete plain input of the left sidebar component. Commands are kept
 /// in `Actions`, so this value remains comparable and can drive incremental
 /// Rabbita branches without embedding emitters in application data.
@@ -170,6 +176,15 @@ pub fn component(
         @html.div(class="sidebar-section sessions", rows),
       ]),
       @html.div(class="sidebar-footer", footer),
+      // Grab strip for drag-to-resize; wired imperatively by the shell's
+      // sidebar_resize. Absolutely positioned, so it is not a grid item and
+      // never disturbs the aside's rows.
+      @html.div(
+        attrs=@html.Attrs::build()
+          .id(ResizeHandleId)
+          .class("sidebar-resize-handle"),
+        ([] : Array[@html.Html]),
+      ),
     ])
   })
 }
