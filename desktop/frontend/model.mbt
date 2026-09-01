@@ -388,43 +388,43 @@ fn AppFont::css_family(self : AppFont) -> String {
 ///|
 /// The base text size selected in Settings. The CSS token scale derives the
 /// surrounding app sizes from this choice; the editor and terminal receive
-/// the pixel value directly because their layout engines measure glyphs.
-priv enum AppFontSize {
-  Small
-  Medium
-  Large
-} derive(Eq)
+/// the adjacent smaller pixel value because their glyphs look larger.
+priv struct AppFontSize(Int) derive(Eq, Debug)
 
 ///|
-/// Unknown or absent stored values retain the current choice, so older builds
-/// and corrupt localStorage values preserve the readable default.
+const AppFontSizeMinPixels : Int = 12
+
+///|
+const AppFontSizeMaxPixels : Int = 18
+
+///|
+/// Invalid ephemeral localStorage values retain the current readable choice.
 fn AppFontSize::parse(value : String, fallback : AppFontSize) -> AppFontSize {
-  match value {
-    "small" => Small
-    "medium" => Medium
-    "large" => Large
-    _ => fallback
+  let pixels = @string.parse_int(value) catch { _ => return fallback }
+  if pixels >= AppFontSizeMinPixels && pixels <= AppFontSizeMaxPixels {
+    AppFontSize(pixels)
+  } else {
+    fallback
   }
 }
 
 ///|
 fn AppFontSize::wire(self : AppFontSize) -> String {
-  match self {
-    Small => "small"
-    Medium => "medium"
-    Large => "large"
-  }
+  let AppFontSize(pixels) = self
+  pixels.to_string()
+}
+
+///|
+fn AppFontSize::base_pixels(self : AppFontSize) -> Int {
+  let AppFontSize(pixels) = self
+  pixels
 }
 
 ///|
 /// Measured monospace surfaces use one pixel less than the selected app base.
 /// Their larger-looking glyphs then align with surrounding system-sans text.
 fn AppFontSize::pixels(self : AppFontSize) -> Double {
-  match self {
-    Small => 12.0
-    Medium => 13.0
-    Large => 14.0
-  }
+  (self.base_pixels() - 1).to_double()
 }
 
 ///|
@@ -2478,7 +2478,7 @@ fn initial_model() -> Model {
     system_dark: host_prefers_dark(),
     theme: System,
     app_font: SystemMono,
-    app_font_size: Medium,
+    app_font_size: AppFontSize(14),
     narrow,
     sidebar_open: !narrow,
     right_panel_open: false,

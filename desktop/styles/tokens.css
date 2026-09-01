@@ -11,10 +11,11 @@
     "Liberation Mono", "Courier New", monospace;
   --font-family-sans: ui-sans-serif, system-ui, -apple-system,
     BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-size-xs: 12px;
-  --font-size-sm: 13px;
-  --font-size-md: 14px;
-  --font-size-lg: 17px;
+  --font-size-base: 14px;
+  --font-size-xs: calc(var(--font-size-base) - 2px);
+  --font-size-sm: calc(var(--font-size-base) - 1px);
+  --font-size-md: var(--font-size-base);
+  --font-size-lg: calc(var(--font-size-base) + 3px);
   --font-weight-regular: 450;
   --line-height-tight: 1;
   --line-height-normal: 1.5;
@@ -149,21 +150,34 @@
     monospace;
 }
 
-/* Medium is the token scale declared on :root. Small and Large shift the four
-   shared steps together, preserving the hierarchy between labels and body
-   text while the selected base size remains exactly 13px or 15px. */
-:root[data-font-size="small"] {
-  --font-size-xs: 11px;
-  --font-size-sm: 12px;
-  --font-size-md: 13px;
-  --font-size-lg: 16px;
+/* Settings moves the base from 12px through 18px. The derived tokens shift as
+   one scale, preserving the hierarchy between labels, body text, and headings. */
+:root[data-font-size="12"] {
+  --font-size-base: 12px;
 }
 
-:root[data-font-size="large"] {
-  --font-size-xs: 13px;
-  --font-size-sm: 14px;
-  --font-size-md: 15px;
-  --font-size-lg: 18px;
+:root[data-font-size="13"] {
+  --font-size-base: 13px;
+}
+
+:root[data-font-size="14"] {
+  --font-size-base: 14px;
+}
+
+:root[data-font-size="15"] {
+  --font-size-base: 15px;
+}
+
+:root[data-font-size="16"] {
+  --font-size-base: 16px;
+}
+
+:root[data-font-size="17"] {
+  --font-size-base: 17px;
+}
+
+:root[data-font-size="18"] {
+  --font-size-base: 18px;
 }
 
 /* The app stylesheet loads after the Viewer theme. Monospace glyphs look

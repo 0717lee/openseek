@@ -1203,9 +1203,13 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
             model,
             id="font-size-select",
             options=[
-              { value: "small", label: "Small (13px)", },
-              { value: "medium", label: "Medium (14px)", },
-              { value: "large", label: "Large (15px)", },
+              { value: "12", label: "12px", },
+              { value: "13", label: "13px", },
+              { value: "14", label: "14px", },
+              { value: "15", label: "15px", },
+              { value: "16", label: "16px", },
+              { value: "17", label: "17px", },
+              { value: "18", label: "18px", },
             ],
             selected=model.app_font_size.wire(),
             aria_label="Font size",
@@ -1416,7 +1420,12 @@ fn workspace_settings_page(
 test "settings and the browser address bar declare form focus ownership" {
   let dispatch = test_dispatch()
   let settings_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(settings_page(dispatch, test_model()))
+    @rabbita.Val::constant(
+      settings_page(dispatch, {
+        ..test_model(),
+        select_menu: Some(FontSizeMenu),
+      }),
+    )
   })
   // Settings use the same app-owned button/listbox control as the composer;
   // no platform select may reintroduce a native popup on one page only.
@@ -1425,6 +1434,9 @@ test "settings and the browser address bar declare form focus ownership" {
     settings_markup.contains("class=\"custom-select setting-select\""),
   )
   assert_true(settings_markup.contains("aria-haspopup=\"listbox\""))
+  assert_true(settings_markup.contains("id=\"font-size-select\""))
+  assert_true(settings_markup.contains("12px"))
+  assert_true(settings_markup.contains("18px"))
   // Settings fields own their existing borders directly; there is no nested
   // target that could draw a second frame.
   assert_true(settings_markup.contains("data-focus-owner=\"\""))
