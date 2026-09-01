@@ -3,6 +3,6 @@
 // DiffEditor boundary.
 
 ///|
-pub fn get_core_document_diff_provider() -> CoreDocumentDiffProvider {
-  CoreDocumentDiffProvider()
+pub fn get_line_document_diff_provider() -> LineDocumentDiffProvider {
+  LineDocumentDiffProvider()
 }

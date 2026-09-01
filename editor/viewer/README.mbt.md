@@ -98,8 +98,8 @@ Hosts own every `TextModel`, DOM host, and explicitly supplied
 
 ## Diff editor contract
 
-`DiffEditor` accepts a synchronous `DocumentDiffProvider`. The default provider
-uses the Core Myers implementation in `viewer/common/diff`. A diff result has
+`DiffEditor` accepts a synchronous `DocumentDiffProvider`. The default line-diff
+provider lives in `viewer/common/diff`. A diff result has
 two distinct inputs:
 
 - `changes` drive decorations, overview markers, and change navigation; and

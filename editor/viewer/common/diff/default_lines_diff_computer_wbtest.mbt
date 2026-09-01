@@ -1,4 +1,4 @@
-// White-box behavior tests for `CoreDocumentDiffProvider`.
+// White-box behavior tests for `LineDocumentDiffProvider`.
 //
 // These local contract/property cases complement the traceable Advanced-diff
 // cases in `advanced_diff_reference_wbtest.mbt`. They do not byte-compare every
@@ -18,7 +18,7 @@ fn compute(
   modified : Array[String],
   options? : DocumentDiffOptions = default_options,
 ) -> DocumentDiff {
-  get_core_document_diff_provider().compute_diff(
+  get_line_document_diff_provider().compute_diff(
     TextSnapshot(original.join("\n")),
     TextSnapshot(modified.join("\n")),
     options,
@@ -36,9 +36,9 @@ fn compute_with_provider(
 }
 
 ///|
-test "Core provider satisfies the public provider contract" {
-  let core = CoreDocumentDiffProvider()
-  let provider : &DocumentDiffProvider = core
+test "Line provider satisfies the public provider contract" {
+  let line = LineDocumentDiffProvider()
+  let provider : &DocumentDiffProvider = line
   let result = try! compute_with_provider(
     provider,
     TextSnapshot("same\nbefore"),
@@ -312,7 +312,7 @@ test "trim whitespace treats whitespace-only and empty documents as equal" {
 
 ///|
 test "snapshot normalization makes CRLF and LF equal" {
-  let provider = CoreDocumentDiffProvider()
+  let provider = LineDocumentDiffProvider()
   let result = provider.compute_diff(
     TextSnapshot("one\r\ntwo\r\n"),
     TextSnapshot("one\ntwo\n"),

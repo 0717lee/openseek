@@ -386,8 +386,8 @@ test "DiffEditorViewModel converts provider errors and invalid mappings to Faile
 }
 
 ///|
-test "validator accepts Core inner anchors on empty hunk sides" {
-  let provider = @diff.get_core_document_diff_provider()
+test "validator accepts Line inner anchors on empty hunk sides" {
+  let provider = @diff.get_line_document_diff_provider()
   let original = @model.TextSnapshot(
     [
       "fn navigation_anchors() {", "  let stable_head = 0", "  let deleted_only = 1",
@@ -444,7 +444,7 @@ test "validator accepts Core inner anchors on empty hunk sides" {
 ///|
 test "ViewModel accepts pinned newline mapping for a pure deletion" {
   let timer = DiffViewModelFakeTimer::DiffViewModelFakeTimer()
-  let provider = @diff.get_core_document_diff_provider()
+  let provider = @diff.get_line_document_diff_provider()
   let view_model = new_diff_view_model_for_test(provider, timer)
   let original = diff_view_model_test_model(
     "newline-deletion-original", "deleted\n\nkeep",
@@ -475,7 +475,7 @@ test "ViewModel accepts pinned newline mapping for a pure deletion" {
 ///|
 test "ViewModel accepts pinned newline mapping for a pure insertion" {
   let timer = DiffViewModelFakeTimer::DiffViewModelFakeTimer()
-  let provider = @diff.get_core_document_diff_provider()
+  let provider = @diff.get_line_document_diff_provider()
   let view_model = new_diff_view_model_for_test(provider, timer)
   let original = diff_view_model_test_model(
     "newline-insertion-original", "\nkeep",

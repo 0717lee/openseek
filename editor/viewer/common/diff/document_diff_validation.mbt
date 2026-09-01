@@ -311,7 +311,7 @@ fn valid_document_diff(
 /// Canonicalize a provider result and accept it only when every mapping follows
 /// the shared document-diff invariants. Optional providers should use this
 /// helper before settling a specialized mode so rejected output can fall back
-/// to Core; the DiffEditor calls it again as the final consumer boundary.
+/// to Line; the DiffEditor calls it again as the final consumer boundary.
 pub fn normalize_and_validate_document_diff(
   result : DocumentDiff,
   original : @model.TextSnapshot,

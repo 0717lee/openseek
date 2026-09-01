@@ -255,6 +255,7 @@ pub(all) enum Msg {
   ReviewDiffNavigationAvailabilityChanged(Bool)
   RevealPreviousReviewDiffChange
   RevealNextReviewDiffChange
+  RevealSemanticReviewSectionChange(String, Bool)
   ToggleReviewProgress
   GitOriginalLoaded(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, generation~ : Int, background~ : Bool, original~ : @protocol.GitOriginalFileReply)
   GitOriginalFailed(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, generation~ : Int, background~ : Bool, message~ : String)
@@ -305,7 +306,7 @@ pub fn ReviewDiffLayout::equal(Self, Self) -> Bool
 pub fn ReviewDiffLayout::not_equal(Self, Self) -> Bool
 
 pub(all) enum ReviewDiffMode {
-  ReviewDiffCore
+  ReviewDiffLine
   ReviewDiffToken
   ReviewDiffTree
 } derive(Eq, @debug.Debug)
@@ -335,6 +336,7 @@ pub(all) struct SemanticReviewInput {
   mode : @moondiff.MoonDiffMode
   ignore_comments : Bool
   ignore_tests : Bool
+  feedback_file : @pathx.Relative?
   live_modified : SemanticReviewLiveDocument?
 } derive(Eq, @debug.Debug)
 pub fn SemanticReviewInput::equal(Self, Self) -> Bool

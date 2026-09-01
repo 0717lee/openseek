@@ -3,7 +3,7 @@ fn test_change(
   original : Array[String],
   modified : Array[String],
 ) -> @diff.DetailedLineRangeMapping raise {
-  let changes = @diff.CoreDocumentDiffProvider().compute_diff(
+  let changes = @diff.LineDocumentDiffProvider().compute_diff(
       TextSnapshot(original.join("\n")),
       TextSnapshot(modified.join("\n")),
       { ignore_trim_whitespace: false, },

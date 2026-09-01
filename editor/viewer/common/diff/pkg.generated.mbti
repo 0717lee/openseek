@@ -8,24 +8,13 @@ import {
 }
 
 // Values
-pub fn get_core_document_diff_provider() -> CoreDocumentDiffProvider
+pub fn get_line_document_diff_provider() -> LineDocumentDiffProvider
 
 pub fn normalize_and_validate_document_diff(DocumentDiff, @model.TextSnapshot, @model.TextSnapshot) -> DocumentDiff?
 
 // Errors
 
 // Types and methods
-pub struct CoreDocumentDiffProvider {
-  _unit : Unit
-} derive(Eq, @debug.Debug)
-pub fn CoreDocumentDiffProvider::CoreDocumentDiffProvider() -> Self
-pub fn CoreDocumentDiffProvider::compute_diff(Self, @model.TextSnapshot, @model.TextSnapshot, DocumentDiffOptions) -> DocumentDiff
-pub fn CoreDocumentDiffProvider::equal(Self, Self) -> Bool
-pub fn CoreDocumentDiffProvider::not_equal(Self, Self) -> Bool
-pub fn CoreDocumentDiffProvider::on_did_change(Self, () -> Unit) -> @common.Disposable
-pub fn CoreDocumentDiffProvider::to_repr(Self) -> @debug.Repr
-pub impl DocumentDiffProvider for CoreDocumentDiffProvider
-
 pub(all) struct DetailedLineRangeMapping {
   original : @common.LineRange
   modified : @common.LineRange
@@ -52,6 +41,17 @@ pub(all) struct DocumentDiffOptions {
 pub fn DocumentDiffOptions::equal(Self, Self) -> Bool
 pub fn DocumentDiffOptions::not_equal(Self, Self) -> Bool
 pub fn DocumentDiffOptions::to_repr(Self) -> @debug.Repr
+
+pub struct LineDocumentDiffProvider {
+  _unit : Unit
+} derive(Eq, @debug.Debug)
+pub fn LineDocumentDiffProvider::LineDocumentDiffProvider() -> Self
+pub fn LineDocumentDiffProvider::compute_diff(Self, @model.TextSnapshot, @model.TextSnapshot, DocumentDiffOptions) -> DocumentDiff
+pub fn LineDocumentDiffProvider::equal(Self, Self) -> Bool
+pub fn LineDocumentDiffProvider::not_equal(Self, Self) -> Bool
+pub fn LineDocumentDiffProvider::on_did_change(Self, () -> Unit) -> @common.Disposable
+pub fn LineDocumentDiffProvider::to_repr(Self) -> @debug.Repr
+pub impl DocumentDiffProvider for LineDocumentDiffProvider
 
 pub(all) struct LineRangeMapping {
   original : @common.LineRange

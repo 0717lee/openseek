@@ -20,9 +20,9 @@ fn semantic_plan_or_fail(
 }
 
 ///|
-test "Core remains the ordinary full-file DiffEditor path" {
+test "Line remains the ordinary full-file DiffEditor path" {
   assert_eq(
-    compute_sectioned_semantic_review_plan("fn old() {}", "fn new() {}", Core),
+    compute_sectioned_semantic_review_plan("fn old() {}", "fn new() {}", Line),
     None,
   )
 }
@@ -56,7 +56,7 @@ test "insertions and deletions retain separate source slices" {
   assert_eq(inserted.modified_source, "fn inserted() {}")
   assert_eq(inserted.old_range, None)
   assert_eq(inserted.new_range, Some({ start_line_number: 1, line_count: 1, }))
-  assert_true(inserted.diff is Core)
+  assert_true(inserted.diff is Line)
 
   guard plan.deleted_sections is [deleted] else {
     fail("expected one deleted section")
@@ -66,7 +66,7 @@ test "insertions and deletions retain separate source slices" {
   assert_eq(deleted.modified_source, "")
   assert_eq(deleted.old_range, Some({ start_line_number: 2, line_count: 1, }))
   assert_eq(deleted.new_range, None)
-  assert_true(deleted.diff is Core)
+  assert_true(deleted.diff is Line)
 }
 
 ///|

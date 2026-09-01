@@ -129,7 +129,7 @@ fn run_diff_editor_lifecycle_test() -> Unit {
   host.set_attribute("class", "diff-lifecycle-host")
   host.set_attribute("style", "width:700px;height:420px;")
   app.append_child(host.as_node())
-  let provider = @diff.CoreDocumentDiffProvider()
+  let provider = @diff.LineDocumentDiffProvider()
   let provider_object : &@diff.DocumentDiffProvider = provider
   let failing_provider = FailingDiffLifecycleProvider::FailingDiffLifecycleProvider()
   let failing_provider_object : &@diff.DocumentDiffProvider = failing_provider

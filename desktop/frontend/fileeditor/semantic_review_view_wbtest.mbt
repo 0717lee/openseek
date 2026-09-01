@@ -40,7 +40,7 @@ fn semantic_test_section(
     fallbacks: [],
     original_source,
     modified_source,
-    diff: @moon_diff_provider.SemanticReviewDiff::Core,
+    diff: @moon_diff_provider.SemanticReviewDiff::Line,
   }
 }
 
@@ -244,7 +244,7 @@ test "semantic input follows active MoonBit review and ignores layout" {
   assert_eq(deleted_input.feedback_file, Some(path))
   assert_eq(deleted_input.live_modified, None)
   assert_eq(
-    semantic_review_input({ ..state, review_diff_mode: ReviewDiffCore, }, ctx),
+    semantic_review_input({ ..state, review_diff_mode: ReviewDiffLine, }, ctx),
     None,
   )
 }

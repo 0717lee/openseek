@@ -310,7 +310,7 @@ pub fn body_view(
   ctx : Ctx,
   semantic_review? : @html.Html = @html.nothing,
 ) -> @html.Html {
-  // The stable elements the code Viewer, MarkdownViewer, and switchable Core
+  // The stable elements the code Viewer, MarkdownViewer, and switchable Line
   // DiffEditor attach their imperative DOM into. Semantic review owns keyed
   // empty child hosts under its stable sibling.
   // (see editor_panel.mbt).
@@ -340,7 +340,7 @@ pub fn body_view(
       None => false
     })
   let use_semantic_surface = use_diff_surface &&
-    state.review_diff_mode != ReviewDiffCore &&
+    state.review_diff_mode != ReviewDiffLine &&
     (match ctx.active_history_diff {
       Some(diff) => supports_moon_diff(diff.path.0)
       None =>
@@ -1896,20 +1896,20 @@ fn moon_diff_ready(state : State, ctx : Ctx) -> Bool {
 }
 
 ///|
-/// Whether the visible comparison is the complete Core DiffEditor. A parked
+/// Whether the visible comparison is the complete Line DiffEditor. A parked
 /// Token/Tree preference does not affect non-MoonBit files, which always keep
-/// the Core surface.
-fn core_diff_ready(state : State, ctx : Ctx) -> Bool {
+/// the Line surface.
+fn line_diff_ready(state : State, ctx : Ctx) -> Bool {
   full_diff_ready(state, ctx) &&
-  (state.review_diff_mode == ReviewDiffCore || !moon_diff_ready(state, ctx))
+  (state.review_diff_mode == ReviewDiffLine || !moon_diff_ready(state, ctx))
 }
 
 ///|
-/// Core receives availability from its mounted provider. Token/Tree plans are
+/// Line receives availability from its mounted provider. Token/Tree plans are
 /// already nonempty change documents, so their aggregate navigation is ready
 /// once at least one semantic item exists.
 fn review_diff_navigation_enabled(state : State, ctx : Ctx) -> Bool {
-  if core_diff_ready(state, ctx) {
+  if line_diff_ready(state, ctx) {
     state.review_diff_navigation_available
   } else {
     full_diff_ready(state, ctx) &&
@@ -1920,7 +1920,7 @@ fn review_diff_navigation_enabled(state : State, ctx : Ctx) -> Bool {
 ///|
 fn ReviewDiffMode::label(self : ReviewDiffMode) -> String {
   match self {
-    ReviewDiffCore => "Line"
+    ReviewDiffLine => "Line"
     ReviewDiffToken => "Token"
     ReviewDiffTree => "Tree"
   }
@@ -1929,7 +1929,7 @@ fn ReviewDiffMode::label(self : ReviewDiffMode) -> String {
 ///|
 fn ReviewDiffMode::attribute(self : ReviewDiffMode) -> String {
   match self {
-    ReviewDiffCore => "core"
+    ReviewDiffLine => "line"
     ReviewDiffToken => "token"
     ReviewDiffTree => "tree"
   }
@@ -1994,10 +1994,10 @@ fn review_mode_toolbar(
       "",
     ),
     review_diff_mode_button(
-      ReviewDiffCore,
-      diff && (!moon || state.review_diff_mode == ReviewDiffCore),
+      ReviewDiffLine,
+      diff && (!moon || state.review_diff_mode == ReviewDiffLine),
       if moon {
-        dispatch(ReviewDiffModeSelected(ReviewDiffCore))
+        dispatch(ReviewDiffModeSelected(ReviewDiffLine))
       } else if diff {
         @cmd.none
       } else {
@@ -2046,9 +2046,9 @@ fn review_diff_mode_toolbar(
       .aria_label("Comparison algorithm"),
     [
       review_diff_mode_button(
-        ReviewDiffCore,
-        state.review_diff_mode == ReviewDiffCore,
-        dispatch(ReviewDiffModeSelected(ReviewDiffCore)),
+        ReviewDiffLine,
+        state.review_diff_mode == ReviewDiffLine,
+        dispatch(ReviewDiffModeSelected(ReviewDiffLine)),
       ),
       review_diff_mode_button(
         ReviewDiffToken,
@@ -2074,7 +2074,7 @@ fn review_comments_control(
     return @html.span(class="review-comments-control hidden", "")
   }
   let enabled = full_diff_ready(state, ctx) &&
-    state.review_diff_mode != ReviewDiffCore
+    state.review_diff_mode != ReviewDiffLine
   @html.button(
     type_="button",
     class=if enabled && state.review_diff_ignore_comments {
@@ -2084,7 +2084,7 @@ fn review_comments_control(
     },
     title=if !full_diff_ready(state, ctx) {
       "Available in diff view"
-    } else if state.review_diff_mode == ReviewDiffCore {
+    } else if state.review_diff_mode == ReviewDiffLine {
       "Available in Token and Tree diff"
     } else if state.review_diff_ignore_comments {
       "Include comments in the comparison"
@@ -2114,7 +2114,7 @@ fn review_tests_control(
     return @html.span(class="review-tests-control hidden", "")
   }
   let enabled = full_diff_ready(state, ctx) &&
-    state.review_diff_mode != ReviewDiffCore
+    state.review_diff_mode != ReviewDiffLine
   @html.button(
     type_="button",
     class=if enabled && state.review_diff_ignore_tests {
@@ -2124,7 +2124,7 @@ fn review_tests_control(
     },
     title=if !full_diff_ready(state, ctx) {
       "Available in diff view"
-    } else if state.review_diff_mode == ReviewDiffCore {
+    } else if state.review_diff_mode == ReviewDiffLine {
       "Available in Token and Tree diff"
     } else if state.review_diff_ignore_tests {
       "Include tests in the comparison"
@@ -2193,7 +2193,7 @@ fn review_diff_navigation(
 }
 
 ///|
-/// Core keeps its two models mounted while Token/Tree reuse one section plan;
+/// Line keeps its two models mounted while Token/Tree reuse one section plan;
 /// this explicit pair changes either presentation. File mode preserves the
 /// preference but disables both choices until the next review reveal.
 fn review_diff_layout_toggle(

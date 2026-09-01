@@ -1,9 +1,9 @@
 ///|
-/// MoonDiff mode selected by the desktop review host. Core is intentionally
-/// absent from the fragment provider below: Core continues to use the normal
+/// MoonDiff mode selected by the desktop review host. Line is intentionally
+/// absent from the fragment provider below: Line continues to use the normal
 /// full-file DiffEditor provider.
 pub(all) enum MoonDiffMode {
-  Core
+  Line
   Token
   Tree
 } derive(Eq, Debug)

@@ -34,7 +34,7 @@ fn ReviewDiffMode::semantic_mode(
   self : ReviewDiffMode,
 ) -> @moon_diff_provider.MoonDiffMode? {
   match self {
-    ReviewDiffCore => None
+    ReviewDiffLine => None
     ReviewDiffToken => Some(@moon_diff_provider.Token)
     ReviewDiffTree => Some(@moon_diff_provider.Tree)
   }
@@ -42,7 +42,7 @@ fn ReviewDiffMode::semantic_mode(
 
 ///|
 /// Extract the visible semantic comparison from either a working-tree review
-/// or Git history. Core, source mode, non-MoonBit files, and unavailable text
+/// or Git history. Line, source mode, non-MoonBit files, and unavailable text
 /// deliberately produce no input.
 fn semantic_review_input(state : State, ctx : Ctx) -> SemanticReviewInput? {
   guard state.review_diff_mode.semantic_mode() is Some(mode) else {
@@ -336,7 +336,7 @@ fn semantic_status_empty_view(
       Some(
         semantic_empty_view(
           if input.mode is @moon_diff_provider.Tree {
-            "No structural changes found. Switch to Token or Core to inspect text."
+            "No structural changes found. Switch to Token or Line to inspect text."
           } else {
             "No token changes found."
           },
@@ -348,7 +348,7 @@ fn semantic_status_empty_view(
           if input.mode is @moon_diff_provider.Tree {
             "No structural changes found. Switch to Token to view text changes."
           } else {
-            "No declaration-owned token changes found. Switch to Core to inspect the complete file."
+            "No declaration-owned token changes found. Switch to Line to inspect the complete file."
           },
         ),
       )
@@ -395,7 +395,7 @@ fn semantic_plan_view(
   }
   if sections.is_empty() {
     semantic_empty_view(
-      "No semantic section changes found. Switch to Core to inspect the complete file.",
+      "No semantic section changes found. Switch to Line to inspect the complete file.",
     )
   } else {
     @html.div(class="semantic-document", sections)
@@ -413,7 +413,7 @@ pub fn semantic_review_view(
   guard state.semantic_review_plan is Some(plan) else {
     return @html.div(class="semantic-review", [
       semantic_empty_view(
-        "The semantic result was invalid. Switch to Core to inspect the complete file.",
+        "The semantic result was invalid. Switch to Line to inspect the complete file.",
       ),
     ])
   }
@@ -549,7 +549,7 @@ fn semantic_review_navigation_subscription(
   dispatch : @cmd.Emit[Msg],
 ) -> @sub.Sub {
   guard review_diff_navigation_enabled(state, ctx) &&
-    !core_diff_ready(state, ctx) else {
+    !line_diff_ready(state, ctx) else {
     return @sub.none
   }
   @sub.custom_sub(
@@ -623,7 +623,7 @@ fn semantic_diff_options(
     render_markdown_comments=true,
     handle_mouse_wheel=false,
     // Token/Tree use the same rich, initially folded Markdown-comment
-    // presentation as ordinary code reading and Core diff. MoonDiff has already
+    // presentation as ordinary code reading and Line diff. MoonDiff has already
     // decided which sections exist, so presentation must not fall back to raw
     // `///` rows. The outer MultiDiff scroll plane owns wheel input, matching
     // VS Code's per-item `handleMouseWheel: false` configuration.
@@ -1038,7 +1038,7 @@ fn create_semantic_review_editor(
     "\{semantic_estimated_height(section, layout)}px",
   )
   let (editor, provider) = match section.diff {
-    @moon_diff_provider.SemanticReviewDiff::Core =>
+    @moon_diff_provider.SemanticReviewDiff::Line =>
       (
         @viewer.DiffEditor::create(
           host,
