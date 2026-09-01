@@ -5,6 +5,21 @@ priv enum DiffEditorScrollPane {
 }
 
 ///|
+/// The exact modified model range passed to one programmatic centered reveal.
+/// Composite hosts retain the range, wait for their item layout to settle, and
+/// then measure its current pixel geometry before projecting the child scroll
+/// into their outer scroll plane.
+pub(all) struct DiffEditorRevealEvent {
+  modified_range : @base_common.Range
+} derive(Eq, Debug)
+
+///|
+pub extend DiffEditorRevealEvent with Eq::{equal, not_equal}
+
+///|
+pub extend DiffEditorRevealEvent with Debug::{to_repr}
+
+///|
 /// A first-class diff widget that owns two code-editor kernels and one shared
 /// diff ViewModel. Product-specific algorithm controls and document
 /// presentation routing are intentionally outside this package.
@@ -42,6 +57,9 @@ pub struct DiffEditorWidget {
   /// last value prevents a host height write followed by `layout()` from
   /// feeding the same height back into the host.
   did_change_content_height : @base_common.Emitter[Double]
+  /// Fires only after a concrete hunk reveal has updated the modified cursor
+  /// and requested the child editor's own centered reveal.
+  did_reveal_change : @base_common.Emitter[DiffEditorRevealEvent]
   mut last_published_content_height : Double?
   /// One VS Code-style `revealFirstDiff` request, bound to the model-pair
   /// generation that was current when the host made it. The request survives
@@ -216,6 +234,7 @@ pub fn DiffEditorWidget::create(
     modified_alignment_geometry: None,
     diff_state: None,
     did_change_content_height: Emitter(),
+    did_reveal_change: Emitter(),
     last_published_content_height: None,
     pending_reveal_first_diff_generation: None,
     pending_reveal_last_diff_generation: None,
@@ -1473,6 +1492,27 @@ pub fn DiffEditorWidget::on_did_change_content_height(
 }
 
 ///|
+/// Fires after a first/last/next/previous hunk reveal with the exact modified
+/// model range sent through the centered reveal pipeline.
+pub fn DiffEditorWidget::on_did_reveal_change(
+  self : DiffEditorWidget,
+  listener : (DiffEditorRevealEvent) -> Unit,
+) -> @base_common.Disposable {
+  self.did_reveal_change.event(listener)
+}
+
+///|
+/// Re-measure a reveal range against the modified pane's latest wrapping and
+/// ViewZone layout. MultiDiff hosts call this after their own section height
+/// has committed instead of retaining stale event-time pixel coordinates.
+pub fn DiffEditorWidget::get_modified_vertical_reveal_bounds(
+  self : DiffEditorWidget,
+  range : @base_common.Range,
+) -> (Double, Double)? {
+  self.editors.modified.get_vertical_reveal_bounds(range)
+}
+
+///|
 /// Largest horizontal overflow of either code pane. MultiDiffEditor uses one
 /// outer horizontal scrollbar and projects its offset into every item, just as
 /// VS Code's DiffEditorItemTemplate reports `maxScroll` to its parent widget.
@@ -1641,8 +1681,10 @@ fn DiffEditorWidget::reveal_change(
     return false
   }
   match plan.pane {
-    ModifiedNavigationPane =>
+    ModifiedNavigationPane => {
       self.editors.modified.reveal_range_in_center(plan.range)
+      self.did_reveal_change.fire({ modified_range: plan.range, })
+    }
   }
   true
 }
@@ -1688,6 +1730,11 @@ pub fn DiffEditorWidget::reveal_first_diff(self : DiffEditorWidget) -> Unit {
   if self.disposed || self.view_model.get_model() is None {
     return
   }
+  // Deferred edge reveals are one last-writer-wins request. A MultiDiff host
+  // can request the last hunk while this initial first-hunk request is waiting
+  // for diff/layout readiness; allowing both to fire would leave the cursor at
+  // the last hunk while the parent consumes the first hunk's scroll event.
+  self.pending_reveal_last_diff_generation = None
   self.pending_reveal_first_diff_generation = Some(
     self.editors.committed_model_generation(),
   )
@@ -1733,6 +1780,7 @@ pub fn DiffEditorWidget::reveal_last_diff(self : DiffEditorWidget) -> Unit {
   if self.disposed || self.view_model.get_model() is None {
     return
   }
+  self.pending_reveal_first_diff_generation = None
   self.pending_reveal_last_diff_generation = Some(
     self.editors.committed_model_generation(),
   )
@@ -1965,5 +2013,6 @@ pub fn DiffEditorWidget::dispose(self : DiffEditorWidget) -> Unit {
   self.inline_original_strip_width = -1.0
   self.clear_pending_scroll_echoes()
   self.did_change_content_height.dispose()
+  self.did_reveal_change.dispose()
   self.host.remove_child(self.root.as_node())
 }

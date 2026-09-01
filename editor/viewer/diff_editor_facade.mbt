@@ -14,6 +14,13 @@ pub fn DiffEditorModel::DiffEditorModel(
 }
 
 ///|
+/// The exact modified model range passed to one diff navigation reveal.
+/// MultiDiff hosts can re-measure this range after their item layout settles.
+pub(all) struct DiffEditorRevealEvent {
+  modified_range : @base_common.Range
+} derive(Eq, Debug)
+
+///|
 pub(all) enum DiffEditorLayout {
   SideBySide
   Inline
@@ -256,6 +263,28 @@ pub fn DiffEditor::on_did_change_content_height(
 }
 
 ///|
+/// Fires after a concrete first/last/next/previous hunk reveal. MultiDiff hosts
+/// can project the child reveal into their shared outer vertical scroll plane.
+pub fn DiffEditor::on_did_reveal_change(
+  self : DiffEditor,
+  listener : (DiffEditorRevealEvent) -> Unit,
+) -> @base_common.Disposable {
+  self.widget.on_did_reveal_change(event => {
+    listener({ modified_range: event.modified_range, })
+  })
+}
+
+///|
+/// Current modified-pane pixel bounds for a model range, using the same
+/// model-to-view conversion and line box as a centered Line diff reveal.
+pub fn DiffEditor::get_modified_vertical_reveal_bounds(
+  self : DiffEditor,
+  range : @base_common.Range,
+) -> (Double, Double)? {
+  self.widget.get_modified_vertical_reveal_bounds(range)
+}
+
+///|
 /// Horizontal overflow exposed for VS Code-shaped MultiDiffEditor hosts.
 pub fn DiffEditor::get_max_scroll_left(self : DiffEditor) -> Double {
   self.widget.get_max_scroll_left()
@@ -352,6 +381,12 @@ pub extend DiffEditorLayout with Eq::{equal, not_equal}
 
 ///|
 pub extend DiffEditorLayout with Debug::{to_repr}
+
+///|
+pub extend DiffEditorRevealEvent with Eq::{equal, not_equal}
+
+///|
+pub extend DiffEditorRevealEvent with Debug::{to_repr}
 
 ///|
 pub extend DiffWordWrap with Eq::{equal, not_equal}

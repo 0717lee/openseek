@@ -465,6 +465,8 @@ priv struct SemanticReviewEditorHost {
   provider : @moon_diff_provider.MoonFragmentDiffProvider?
   diff_subscription : @common.Disposable
   content_height_subscription : @common.Disposable
+  navigation_reveal_subscription : @common.Disposable
+  pending_navigation_reveal_generation : Ref[Int?]
   focus_subscription : @common.Disposable
 }
 
@@ -476,6 +478,11 @@ let semantic_review_order : Array[String] = []
 
 ///|
 let semantic_review_active_key : Ref[String?] = Ref(None)
+
+///|
+/// Fences deferred reveal events and animation frames across rapid navigation,
+/// section replacement, and surface teardown.
+let semantic_review_navigation_generation : Ref[Int] = Ref(0)
 
 ///|
 priv enum SemanticReviewNavigationDirection {
@@ -935,6 +942,203 @@ fn semantic_estimated_height(
 }
 
 ///|
+/// The child scroll target produced by Line diff's `Center` reveal for an
+/// explicit viewport. This is the relevant subset of
+/// `ViewLayout::compute_scroll_top_to_reveal_range`: oversized ranges align at
+/// the top, ordinary ranges center, and the result clamps to the child extent.
+fn semantic_review_child_scroll_top_to_reveal(
+  viewport_height : Double,
+  content_height : Double,
+  reveal_top : Double,
+  reveal_bottom : Double,
+) -> Double {
+  if viewport_height <= 0.0 {
+    return 0.0
+  }
+  let box_start = reveal_top
+  let box_end = reveal_bottom.max(reveal_top)
+  let target = if box_end - box_start > viewport_height {
+    box_start
+  } else {
+    (box_start + box_end - viewport_height) / 2.0
+  }
+  target.clamp(min=0.0, max=(content_height - viewport_height).max(0.0))
+}
+
+///|
+/// Apply the child reveal as a delta to Token/Tree's outer scroll position.
+/// VS Code's `diffEditorItemTemplate.ts` forwards exactly
+/// `newChildScrollTop - lastChildScrollTop` to the MultiDiff parent, while
+/// `multiDiffEditorWidgetImpl.ts::render` constrains each child to the outer
+/// viewport minus its item chrome. Our items use natural DOM flow instead of
+/// virtualization, so this function reconstructs those same current/target
+/// child offsets and returns the resulting outer scroll position.
+fn semantic_review_scroll_top_after_child_reveal(
+  outer_scroll_top : Double,
+  outer_viewport_height : Double,
+  item_content_top : Double,
+  item_content_height : Double,
+  editor_content_top : Double,
+  sticky_chrome_height : Double,
+  reveal_top : Double,
+  reveal_bottom : Double,
+) -> Double {
+  let item_viewport_height = item_content_height
+    .min(outer_viewport_height)
+    .max(0.0)
+  let child_viewport_height = (item_viewport_height - sticky_chrome_height).max(
+    0.0,
+  )
+  if child_viewport_height <= 0.0 {
+    return outer_scroll_top.max(0.0)
+  }
+  // Notices before the editor are ordinary scrolling content, not sticky
+  // chrome. Shift the editor-local reveal box through that prefix while only
+  // reserving the actual sticky header from the child viewport.
+  let scrolling_prefix_height = (editor_content_top -
+  item_content_top -
+  sticky_chrome_height).max(0.0)
+  let child_content_height = (item_content_height - sticky_chrome_height).max(
+    0.0,
+  )
+  let max_child_scroll = (child_content_height - child_viewport_height).max(0.0)
+  let needs_origin = semantic_review_item_needs_navigation_origin(
+    outer_scroll_top, outer_viewport_height, item_content_top, item_content_height,
+  )
+  let projection_outer_scroll_top = if needs_origin {
+    item_content_top
+  } else {
+    outer_scroll_top
+  }
+  let current_child_scroll = if needs_origin {
+    0.0
+  } else {
+    (outer_scroll_top - item_content_top).clamp(min=0.0, max=max_child_scroll)
+  }
+  let target_child_scroll = semantic_review_child_scroll_top_to_reveal(
+    child_viewport_height,
+    child_content_height,
+    scrolling_prefix_height + reveal_top,
+    scrolling_prefix_height + reveal_bottom,
+  )
+  (projection_outer_scroll_top + target_child_scroll - current_child_scroll).max(
+    0.0,
+  )
+}
+
+///|
+/// Project one child DiffEditor's centered reveal into Token/Tree's single
+/// outer vertical scroll plane. Two frame boundaries let the reveal's paired
+/// content-height publication and editor layout commit first; pixel bounds are
+/// deliberately re-measured in the second frame so Markdown/ViewZone geometry
+/// cannot go stale between the reveal event and the parent scroll.
+fn schedule_semantic_review_reveal_scroll(
+  key : String,
+  editor_host : @dom.Element,
+  editor : @viewer.DiffEditor,
+  event : @viewer.DiffEditorRevealEvent,
+  generation : Int,
+) -> Unit {
+  @dom.window().request_animation_frame(_ => {
+    guard semantic_review_navigation_generation.val == generation &&
+      semantic_review_active_key.val == Some(key) &&
+      @base_browser.element_is_connected(editor_host) else {
+      return
+    }
+    @dom.window().request_animation_frame(_ => {
+      guard semantic_review_navigation_generation.val == generation &&
+        semantic_review_active_key.val == Some(key) &&
+        @base_browser.element_is_connected(editor_host) &&
+        @dom.document().get_element_by_id(SemanticReviewHostId).to_option()
+        is Some(scroll_host) &&
+        editor_host.closest(".semantic-diff-entry") is Some(item) &&
+        item.query_selector(".semantic-entry-header") is Some(header) &&
+        editor.get_modified_vertical_reveal_bounds(event.modified_range)
+        is Some((reveal_top, reveal_bottom)) else {
+        return
+      }
+      let viewport_height = scroll_host.get_client_height()
+      let editor_content_height = editor.get_content_height()
+      if viewport_height <= 0.0 ||
+        item.get_client_height() <= 0.0 ||
+        editor_host.get_client_height() <= 0.0 ||
+        editor_content_height <= 0.0 {
+        return
+      }
+      let outer_scroll_top = scroll_host.get_scroll_top()
+      let scroll_rect = scroll_host.get_bounding_client_rect()
+      let item_rect = item.get_bounding_client_rect()
+      let editor_rect = editor_host.get_bounding_client_rect()
+      let item_content_top = outer_scroll_top +
+        item_rect.get_top() -
+        scroll_rect.get_top()
+      let editor_content_top = outer_scroll_top +
+        editor_rect.get_top() -
+        scroll_rect.get_top()
+      scroll_host.set_scroll_top(
+        semantic_review_scroll_top_after_child_reveal(
+          outer_scroll_top,
+          viewport_height,
+          item_content_top,
+          item.get_client_height(),
+          editor_content_top,
+          header.get_client_height(),
+          reveal_top,
+          reveal_bottom,
+        ),
+      )
+    })
+    |> ignore
+  })
+  |> ignore
+}
+
+///|
+/// VS Code's cross-item `_goToFile` first reveals the destination item at its
+/// content start; the child editor's subsequent centered reveal contributes a
+/// local scroll delta. Do the same before requesting first/last in a section.
+fn reveal_semantic_review_item_start(editor_host : @dom.Element) -> Unit {
+  guard @dom.document().get_element_by_id(SemanticReviewHostId).to_option()
+    is Some(scroll_host) &&
+    editor_host.closest(".semantic-diff-entry") is Some(item) else {
+    return
+  }
+  let scroll_rect = scroll_host.get_bounding_client_rect()
+  let item_rect = item.get_bounding_client_rect()
+  scroll_host.set_scroll_top(
+    scroll_host.get_scroll_top() + item_rect.get_top() - scroll_rect.get_top(),
+  )
+}
+
+///|
+/// A focused MultiDiff item can be moved out of the outer viewport with the
+/// wheel while remaining the active navigation item. VS Code materializes and
+/// reveals such an item before asking its child to navigate. A short item also
+/// needs to be fully visible because it has no child scroll range with which to
+/// contribute a corrective delta.
+fn semantic_review_item_needs_navigation_origin(
+  outer_scroll_top : Double,
+  outer_viewport_height : Double,
+  item_content_top : Double,
+  item_content_height : Double,
+) -> Bool {
+  if outer_viewport_height <= 0.0 || item_content_height <= 0.0 {
+    return false
+  }
+  let outer_bottom = outer_scroll_top + outer_viewport_height
+  let item_bottom = item_content_top + item_content_height
+  if item_content_height <= outer_viewport_height {
+    item_content_top < outer_scroll_top || item_bottom > outer_bottom
+  } else {
+    // Delta projection is valid only while the parent's local offset lies in
+    // the long child's real scroll band, i.e. while the viewport is fully
+    // contained by the item. A sliver at either edge still represents a
+    // clamped child offset and must be re-originated first.
+    outer_scroll_top < item_content_top || outer_bottom > item_bottom
+  }
+}
+
+///|
 /// Commit one final DiffEditor height to its MultiDiff item. The content-height
 /// event can arrive while `create_semantic_review_editor` is still constructing
 /// the map entry, so this helper deliberately captures the concrete host and
@@ -972,8 +1176,11 @@ fn schedule_semantic_review_scroll_width_update() -> Unit {
 
 ///|
 fn dispose_semantic_review_editor(entry : SemanticReviewEditorHost) -> Unit {
+  semantic_review_navigation_generation.val += 1
   entry.diff_subscription.dispose()
   entry.content_height_subscription.dispose()
+  entry.pending_navigation_reveal_generation.val = None
+  entry.navigation_reveal_subscription.dispose()
   entry.focus_subscription.dispose()
   match entry.editor.set_model(None) {
     Some(previous) => {
@@ -1075,6 +1282,14 @@ fn create_semantic_review_editor(
     apply_semantic_review_editor_height(host, editor, content_height)
     update_semantic_review_scroll_width()
   })
+  let pending_navigation_reveal_generation : Ref[Int?] = Ref(None)
+  let navigation_reveal_subscription = editor.on_did_reveal_change(event => {
+    guard pending_navigation_reveal_generation.val is Some(generation) else {
+      return
+    }
+    pending_navigation_reveal_generation.val = None
+    schedule_semantic_review_reveal_scroll(key, host, editor, event, generation)
+  })
   let focus_listener : @dom.Listener = _ => {
     semantic_review_active_key.val = Some(key)
   }
@@ -1111,6 +1326,8 @@ fn create_semantic_review_editor(
     provider,
     diff_subscription,
     content_height_subscription,
+    navigation_reveal_subscription,
+    pending_navigation_reveal_generation,
     focus_subscription,
   })
 }
@@ -1160,6 +1377,7 @@ fn refresh_semantic_review_editor_options() -> Unit {
 
 ///|
 fn clear_semantic_review_editors() -> Unit {
+  semantic_review_navigation_generation.val += 1
   let keys = semantic_review_editors.to_array().map(pair => pair.0)
   for key in keys {
     if semantic_review_editors.get(key) is Some(entry) {
@@ -1180,6 +1398,16 @@ fn semantic_review_navigation_index(current : String?) -> Int {
 }
 
 ///|
+fn arm_semantic_review_navigation_reveal(
+  entry : SemanticReviewEditorHost,
+) -> Unit {
+  semantic_review_navigation_generation.val += 1
+  entry.pending_navigation_reveal_generation.val = Some(
+    semantic_review_navigation_generation.val,
+  )
+}
+
+///|
 /// Move within the focused DiffEditor first, then cycle across Token/Tree
 /// items exactly like VS Code's MultiDiffEditor navigation action.
 fn navigate_semantic_review_change(
@@ -1193,6 +1421,7 @@ fn navigate_semantic_review_change(
     let current = semantic_review_order[index]
     if !collapsed.contains(current) &&
       semantic_review_editors.get(current) is Some(entry) {
+      arm_semantic_review_navigation_reveal(entry)
       let revealed = match direction {
         SemanticReviewPrevious =>
           entry.editor.reveal_previous_change_without_wrap()
@@ -1200,13 +1429,10 @@ fn navigate_semantic_review_change(
       }
       if revealed {
         semantic_review_active_key.val = Some(current)
-        entry.host.scroll_into_view_with_options(
-          block="nearest",
-          inline="nearest",
-        )
         entry.editor.focus()
         return
       }
+      entry.pending_navigation_reveal_generation.val = None
     }
     let target_index = match direction {
       SemanticReviewPrevious =>
@@ -1242,10 +1468,8 @@ fn reveal_semantic_review_section_change(
         return
       }
       semantic_review_active_key.val = Some(key)
-      entry.host.scroll_into_view_with_options(
-        block="nearest",
-        inline="nearest",
-      )
+      reveal_semantic_review_item_start(entry.host)
+      arm_semantic_review_navigation_reveal(entry)
       if reveal_last {
         entry.editor.reveal_last_diff()
       } else {
