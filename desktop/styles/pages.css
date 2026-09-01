@@ -529,6 +529,61 @@ h2 {
   line-height: var(--line-height-relaxed);
 }
 
+.skill-metadata {
+  margin-bottom: 24px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  overflow: hidden;
+}
+
+.skill-metadata-title {
+  padding: 12px 14px 10px;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.skill-metadata-scroll {
+  overflow-x: auto;
+}
+
+.skill-metadata-table {
+  width: 100%;
+  min-width: 460px;
+  margin: 0;
+  border: 0;
+  border-collapse: collapse;
+  table-layout: auto;
+  background: var(--color-bg-surface);
+  font-size: var(--font-size-sm);
+}
+
+.skill-metadata-table th,
+.skill-metadata-table td {
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  line-height: var(--line-height-normal);
+  text-align: left;
+  vertical-align: top;
+}
+
+.skill-metadata-table th {
+  width: 1%;
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.skill-metadata-table tbody td {
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .skill-detail-page {
   max-width: 840px;
 }
