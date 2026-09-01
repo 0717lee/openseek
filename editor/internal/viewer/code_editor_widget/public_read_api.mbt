@@ -111,6 +111,30 @@ pub fn CodeEditorWidget::get_top_for_line_number(
 }
 
 ///|
+/// Content-space box used by the vertical reveal pipeline for `model_range`.
+/// This deliberately uses the first view line's rendered top, rather than the
+/// top of any preceding ViewZone: it is the same box consumed by
+/// `ViewLayout::compute_scroll_top_to_reveal_range`. ViewZones before or inside
+/// the range still shift/expand these coordinates, and model-to-view conversion
+/// keeps the result correct under wrapping.
+pub fn CodeEditorWidget::get_vertical_reveal_bounds(
+  self : CodeEditorWidget,
+  model_range : @base_common.Range,
+) -> (Double, Double)? {
+  guard self.is_code_presentation() else { return None }
+  guard self.get_view_model() is Some(view_model) else { return None }
+  let view_range = view_model
+    .coordinates_converter()
+    .model_range_to_view_range(model_range)
+  let start_line = view_range.start_line_number
+  let end_line = view_range.end_line_number
+  let top = view_model.view_layout.vertical_offset_for_line(start_line)
+  let bottom = view_model.view_layout.vertical_offset_for_line(end_line) +
+    view_model.view_layout.get_line_height_for_line_number(end_line).to_double()
+  Some((top, bottom))
+}
+
+///|
 /// 1-based "Col" value for a status bar (tabs snap to tab stops, code points),
 /// Monaco's `getStatusbarColumn` (`cew:652`). No model → the raw input column.
 fn CodeEditorWidget::get_statusbar_column(

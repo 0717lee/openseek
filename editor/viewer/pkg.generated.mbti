@@ -39,9 +39,11 @@ pub fn DiffEditor::get_diff(Self) -> @diff.DocumentDiff?
 pub fn DiffEditor::get_layout(Self) -> DiffEditorLayout
 pub fn DiffEditor::get_max_scroll_left(Self) -> Double
 pub fn DiffEditor::get_model(Self) -> DiffEditorModel?
+pub fn DiffEditor::get_modified_vertical_reveal_bounds(Self, @common.Range) -> (Double, Double)?
 pub fn DiffEditor::is_diff_up_to_date(Self) -> Bool
 pub fn DiffEditor::layout(Self) -> Unit
 pub fn DiffEditor::on_did_change_content_height(Self, (Double) -> Unit) -> @common.Disposable
+pub fn DiffEditor::on_did_reveal_change(Self, (DiffEditorRevealEvent) -> Unit) -> @common.Disposable
 pub fn DiffEditor::on_did_update_diff(Self, () -> Unit) -> @common.Disposable
 pub fn DiffEditor::reveal_first_diff(Self) -> Unit
 pub fn DiffEditor::reveal_last_diff(Self) -> Unit
@@ -75,6 +77,13 @@ pub fn DiffEditorOptions::layout(Self) -> DiffEditorLayout
 pub fn DiffEditorOptions::with_editor_options(Self, ViewerOptions) -> Self
 pub fn DiffEditorOptions::with_layout(Self, DiffEditorLayout) -> Self
 pub fn DiffEditorOptions::with_render_indicators(Self, Bool) -> Self
+
+pub(all) struct DiffEditorRevealEvent {
+  modified_range : @common.Range
+} derive(Eq, @debug.Debug)
+pub fn DiffEditorRevealEvent::equal(Self, Self) -> Bool
+pub fn DiffEditorRevealEvent::not_equal(Self, Self) -> Bool
+pub fn DiffEditorRevealEvent::to_repr(Self) -> @debug.Repr
 
 pub(all) enum DiffWordWrap {
   Inherit

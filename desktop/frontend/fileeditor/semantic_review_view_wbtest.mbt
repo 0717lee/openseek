@@ -512,3 +512,87 @@ test "semantic multi-diff entry collapse is tab-local retained state" {
   )
   assert_true(unknown == expanded)
 }
+
+///|
+test "semantic hunk reveal projects the VS Code child scroll delta" {
+  // The active item has 40px of sticky chrome, leaving a 360px editor
+  // viewport. Its child target is 430; starting at child scroll 0 moves the
+  // outer viewport from 500 to 930.
+  assert_eq(
+    semantic_review_scroll_top_after_child_reveal(
+      500.0, 400.0, 500.0, 1040.0, 540.0, 40.0, 600.0, 620.0,
+    ),
+    930.0,
+  )
+  // Repeating the same reveal from a child scroll of 200 lands at the same
+  // absolute target by applying only the remaining delta.
+  assert_eq(
+    semantic_review_scroll_top_after_child_reveal(
+      700.0, 400.0, 500.0, 1040.0, 540.0, 40.0, 600.0, 620.0,
+    ),
+    930.0,
+  )
+  // An oversized line range aligns immediately below the 40px sticky chrome,
+  // matching the child editor's top reveal rather than hiding it underneath.
+  assert_eq(
+    semantic_review_scroll_top_after_child_reveal(
+      240.0, 300.0, 240.0, 700.0, 280.0, 40.0, 80.0, 480.0,
+    ),
+    320.0,
+  )
+  // A short item has no child scroll range. Same-item navigation therefore
+  // preserves the parent position, as VS Code's zero scroll delta does.
+  assert_eq(
+    semantic_review_scroll_top_after_child_reveal(
+      0.0, 400.0, 20.0, 200.0, 60.0, 40.0, 10.0, 30.0,
+    ),
+    0.0,
+  )
+  // A non-sticky notice before the editor shifts the target through the
+  // child's scrolling content; it does not shrink the viewport like chrome.
+  assert_eq(
+    semantic_review_scroll_top_after_child_reveal(
+      500.0, 400.0, 500.0, 1080.0, 580.0, 40.0, 600.0, 620.0,
+    ),
+    970.0,
+  )
+  // If a long active item only clips the viewport edge, its clamped child
+  // offset is not a valid delta origin. Re-origin at the item before applying
+  // the target so the hunk still lands below the sticky header.
+  assert_eq(
+    semantic_review_scroll_top_after_child_reveal(
+      100.0, 400.0, 450.0, 1040.0, 490.0, 40.0, 600.0, 620.0,
+    ),
+    880.0,
+  )
+}
+
+///|
+test "semantic navigation restores an active item that left the viewport" {
+  // A short item must be entirely visible because its child has no scroll
+  // range. Partial visibility therefore restores the item origin.
+  assert_true(
+    semantic_review_item_needs_navigation_origin(100.0, 400.0, 450.0, 100.0),
+  )
+  assert_true(
+    !semantic_review_item_needs_navigation_origin(100.0, 400.0, 200.0, 100.0),
+  )
+  // A long item keeps its current child offset while it fully contains the
+  // viewport. Partial overlap at either edge is outside the child's valid
+  // scroll band and must be re-established too.
+  assert_true(
+    !semantic_review_item_needs_navigation_origin(300.0, 400.0, 100.0, 800.0),
+  )
+  assert_true(
+    semantic_review_item_needs_navigation_origin(900.0, 400.0, 100.0, 800.0),
+  )
+  assert_true(
+    semantic_review_item_needs_navigation_origin(100.0, 400.0, 500.0, 800.0),
+  )
+  assert_true(
+    semantic_review_item_needs_navigation_origin(100.0, 400.0, 450.0, 800.0),
+  )
+  assert_true(
+    semantic_review_item_needs_navigation_origin(450.0, 400.0, 100.0, 700.0),
+  )
+}

@@ -200,6 +200,42 @@ test('defers a one-shot first-diff reveal through computation and hidden layout'
   await disposeDiffLifecycle(page);
 });
 
+test('the latest deferred edge reveal supersedes an earlier request', async ({ page }) => {
+  const root = await openDiffLifecycle(page);
+  const host = page.locator('.diff-lifecycle-host');
+  const modified = root.locator('.moonbit-diff-editor-modified');
+
+  // Semantic MultiDiff items request their initial first hunk while hidden.
+  // Shift+F7 can supersede that with a last-hunk request before the diff and
+  // layout become ready. Only the later request may move the cursor/viewport.
+  await host.evaluate((node) => {
+    node.style.display = 'none';
+  });
+  await page.evaluate(() => {
+    globalThis.__diffEditorLifecycleControls.set_fixture('late');
+    globalThis.__diffEditorLifecycleControls.reveal_first_diff();
+    globalThis.__diffEditorLifecycleControls.reveal_last_diff();
+  });
+  await expect
+    .poll(() => page.evaluate(() =>
+      globalThis.__diffEditorLifecycleControls.snapshot().diffUpToDate,
+    ))
+    .toBe(true);
+  await host.evaluate((node) => {
+    node.style.display = 'block';
+  });
+  await waitForDiffLifecycleIdle(page);
+
+  await expect(
+    modified.locator('.line-numbers.active-line-number'),
+  ).toHaveText('190');
+  await expect(
+    modified.locator('.view-line').filter({ hasText: 'new second hunk' }),
+  ).toBeVisible();
+
+  await disposeDiffLifecycle(page);
+});
+
 test('owns and tears down exactly two kernels and one shared diff view model', async ({ page }) => {
   await page.goto('/browser-tests/component.html?diffLifecycle=1');
   await page.waitForFunction(() => Boolean(globalThis.__diffEditorLifecycleControls));

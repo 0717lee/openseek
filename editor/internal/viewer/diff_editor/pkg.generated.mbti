@@ -63,6 +63,13 @@ pub(all) struct DiffEditorOptions {
 pub fn DiffEditorOptions::DiffEditorOptions(layout? : DiffEditorLayout, automatic_inline? : Bool, automatic_inline_width? : Double, sash_enabled? : Bool, split_ratio? : Double, diff_word_wrap? : DiffWordWrap, overview_ruler? : Bool, render_indicators? : Bool, render_markdown_comments? : Bool, handle_mouse_wheel? : Bool, ignore_trim_whitespace? : Bool) -> Self
 pub fn DiffEditorOptions::default() -> Self
 
+pub(all) struct DiffEditorRevealEvent {
+  modified_range : @common.Range
+} derive(Eq, @debug.Debug)
+pub fn DiffEditorRevealEvent::equal(Self, Self) -> Bool
+pub fn DiffEditorRevealEvent::not_equal(Self, Self) -> Bool
+pub fn DiffEditorRevealEvent::to_repr(Self) -> @debug.Repr
+
 pub struct DiffEditorViewModel {
   mut provider : &@diff.DocumentDiffProvider
   mut provider_subscription : @common.Disposable?
@@ -131,6 +138,7 @@ pub struct DiffEditorWidget {
   mut modified_alignment_geometry : PaneGeometrySnapshot?
   mut diff_state : DiffState?
   did_change_content_height : @common.Emitter[Double]
+  did_reveal_change : @common.Emitter[DiffEditorRevealEvent]
   mut last_published_content_height : Double?
   mut pending_reveal_first_diff_generation : Int?
   mut pending_reveal_last_diff_generation : Int?
@@ -159,10 +167,12 @@ pub fn DiffEditorWidget::get_diff(Self) -> @diff.DocumentDiff?
 pub fn DiffEditorWidget::get_layout(Self) -> DiffEditorLayout
 pub fn DiffEditorWidget::get_max_scroll_left(Self) -> Double
 pub fn DiffEditorWidget::get_model(Self) -> DiffEditorModelData?
+pub fn DiffEditorWidget::get_modified_vertical_reveal_bounds(Self, @common.Range) -> (Double, Double)?
 pub fn DiffEditorWidget::is_diff_up_to_date(Self) -> Bool
 pub fn DiffEditorWidget::layout(Self) -> Unit
 pub fn DiffEditorWidget::lifecycle_snapshot(Self) -> DiffEditorWidgetLifecycleSnapshot
 pub fn DiffEditorWidget::on_did_change_content_height(Self, (Double) -> Unit) -> @common.Disposable
+pub fn DiffEditorWidget::on_did_reveal_change(Self, (DiffEditorRevealEvent) -> Unit) -> @common.Disposable
 pub fn DiffEditorWidget::on_did_update_diff(Self, () -> Unit) -> @common.Disposable
 pub fn DiffEditorWidget::reveal_first_diff(Self) -> Unit
 pub fn DiffEditorWidget::reveal_last_diff(Self) -> Unit

@@ -177,6 +177,33 @@ test "read API: include_view_zones shifts the vertical offset past a zone" {
 }
 
 ///|
+/// Reveal bounds use the same line box as the ordinary reveal pipeline. A zone
+/// before the start shifts the whole box; a zone inside a multi-line range
+/// expands that box without changing its first-line anchor.
+test "read API: vertical reveal bounds match line reveal geometry" {
+  with_test_viewer(
+    (
+      #|a
+      #|b
+      #|c
+      #|d
+      #|e
+    ),
+    viewer => {
+      viewer.test_set_layout_view_zones([(2, 30)])
+      assert_eq(
+        viewer.get_vertical_reveal_bounds(Range(3, 1, 3, 1)),
+        Some((66.0, 84.0)),
+      )
+      assert_eq(
+        viewer.get_vertical_reveal_bounds(Range(2, 1, 3, 1)),
+        Some((18.0, 84.0)),
+      )
+    },
+  )
+}
+
+///|
 /// Scroll and content extents over a known content size and scroll position.
 test "read API: scroll and content extents" {
   with_test_viewer(long_document(200), viewer => {
