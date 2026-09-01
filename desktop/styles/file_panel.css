@@ -1464,6 +1464,11 @@ button.git-history-file:focus-visible {
   background: var(--color-bg-subtle);
 }
 
+button.git-history-file.selected {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-soft);
+}
+
 .git-history-file.unavailable {
   color: var(--color-text-muted);
   cursor: default;

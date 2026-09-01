@@ -729,7 +729,7 @@ fn review_git_layout(
                 }
                 dispatch(GitHistoryLoadMoreRequested)
               }),
-            git_graph_inventory(dispatch, state),
+            git_graph_inventory(dispatch, state, ctx),
           ),
         ],
       ),
@@ -781,6 +781,7 @@ fn focus_git_commit_after_render(index : Int) -> @cmd.Cmd {
 fn git_graph_inventory(
   dispatch : @cmd.Emit[Msg],
   state : State,
+  ctx : Ctx,
 ) -> Array[@html.Html] {
   match state.git_graph {
     GitGraphIdle | GitGraphLoading =>
@@ -823,6 +824,7 @@ fn git_graph_inventory(
           git_commit_row(
             dispatch,
             state,
+            ctx,
             commit,
             layouts[index],
             index,
@@ -1148,6 +1150,7 @@ fn git_commit_refs(
 fn git_commit_row(
   dispatch : @cmd.Emit[Msg],
   state : State,
+  ctx : Ctx,
   commit : @protocol.GitHistoryCommit,
   layout : GraphRow,
   index : Int,
@@ -1224,7 +1227,7 @@ fn git_commit_row(
     ),
   ]
   if expanded {
-    children.push(git_commit_files(dispatch, state, commit, layout))
+    children.push(git_commit_files(dispatch, state, ctx, commit, layout))
   }
   @html.div(class="git-commit-entry", children)
 }
@@ -1245,6 +1248,7 @@ fn historical_status_label(status : String) -> String {
 fn git_commit_files(
   dispatch : @cmd.Emit[Msg],
   state : State,
+  ctx : Ctx,
   commit : @protocol.GitHistoryCommit,
   layout : GraphRow,
 ) -> @html.Html {
@@ -1285,6 +1289,15 @@ fn git_commit_files(
           let selectable = file.kind == "file" &&
             !(["renamed", "copied"].contains(file.status) &&
             file.original_path is None)
+          let diff : @dock.GitHistoryDiff = {
+            commit: commit.id,
+            parent,
+            path: @pathx.Relative(file.path),
+            original_path: file.original_path.map(path => @pathx.Relative(path)),
+            status: file.status,
+            kind: file.kind,
+          }
+          let selected = ctx.active_history_diff == Some(diff)
           let contents : Array[@html.Html] = [
             git_graph_placeholder(columns, highlight_index),
             @html.span(class="git-history-file-path", file.path),
@@ -1295,21 +1308,16 @@ fn git_commit_files(
           ]
           if selectable {
             @html.button(
-              class="git-history-file",
+              class=if selected {
+                "git-history-file selected"
+              } else {
+                "git-history-file"
+              },
               title="Open historical diff for \{file.path}",
-              on_click=dispatch(
-                HistoricalFileSelected({
-                  commit: commit.id,
-                  parent,
-                  path: @pathx.Relative(file.path),
-                  original_path: file.original_path.map(path => {
-                    @pathx.Relative(path)
-                  }),
-                  status: file.status,
-                  kind: file.kind,
-                }),
-              ),
-              attrs=@html.Attrs::build().role("treeitem"),
+              on_click=dispatch(HistoricalFileSelected(diff)),
+              attrs=@html.Attrs::build()
+                .role("treeitem")
+                .aria_current(if selected { "page" } else { "false" }),
               contents,
             )
           } else {
