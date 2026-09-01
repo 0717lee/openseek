@@ -12084,7 +12084,7 @@ test "loaded UI preferences parse their wire names" {
       tree_layout="",
       theme="dark",
       font="menlo",
-      font_size="large",
+      font_size="15",
       model="deepseek-v4-flash",
       conversation_models="[{\"key\":\"local/desktop-test\",\"model\":\"deepseek-v4-pro\"}]",
       agent="codex",
@@ -12098,7 +12098,7 @@ test "loaded UI preferences parse their wire names" {
   assert_true(restored.notification_corner is TopLeft)
   assert_true(restored.theme is Dark)
   assert_true(restored.app_font is Menlo)
-  assert_true(restored.app_font_size is Large)
+  assert_eq(restored.app_font_size, AppFontSize(15))
   assert_true(restored.default_model is Low)
   assert_true(restored.default_agent is CodexAgent)
   assert_true(restored.openseek_reasoning is ReasoningHigh)
@@ -12127,7 +12127,7 @@ test "loaded UI preferences parse their wire names" {
   assert_true(unknown.notification_corner is BottomRight)
   assert_true(unknown.theme is System)
   assert_true(unknown.app_font is SystemMono)
-  assert_true(unknown.app_font_size is Medium)
+  assert_eq(unknown.app_font_size, AppFontSize(14))
   assert_true(unknown.default_model is High)
   assert_true(unknown.openseek_reasoning is ReasoningMax)
   assert_true(unknown.glm_reasoning is ReasoningOff)
@@ -15302,24 +15302,21 @@ test "monospace settings switch code surfaces and are idempotent" {
 
 ///|
 test "font-size settings switch every text surface and are idempotent" {
-  assert_eq(Small.pixels(), 12.0)
-  assert_eq(Medium.pixels(), 13.0)
-  assert_eq(Large.pixels(), 14.0)
+  assert_eq(AppFontSize(12).pixels(), 11.0)
+  assert_eq(AppFontSize(14).pixels(), 13.0)
+  assert_eq(AppFontSize(18).pixels(), 17.0)
   let dispatch = test_dispatch()
   let model = test_model()
-  let (_, first) = update(dispatch, FontSizeChanged("small"), model)
-  let (_, second) = update(dispatch, FontSizeChanged("small"), model)
-  assert_true(first.app_font_size is Small)
-  assert_true(second.app_font_size is Small)
-  assert_eq(first.app_font_size.pixels(), 12.0)
-  let (_, large) = update(dispatch, FontSizeChanged("large"), first)
-  assert_true(large.app_font_size is Large)
-  assert_eq(large.app_font_size.pixels(), 14.0)
-  let (_, medium) = update(dispatch, FontSizeChanged("medium"), large)
-  assert_true(medium.app_font_size is Medium)
-  assert_eq(medium.app_font_size.pixels(), 13.0)
+  let (_, first) = update(dispatch, FontSizeChanged("15"), model)
+  let (_, second) = update(dispatch, FontSizeChanged("15"), first)
+  assert_eq(first.app_font_size, AppFontSize(15))
+  assert_eq(second.app_font_size, AppFontSize(15))
+  assert_eq(first.app_font_size.pixels(), 14.0)
+  let (_, largest) = update(dispatch, FontSizeChanged("18"), first)
+  assert_eq(largest.app_font_size, AppFontSize(18))
+  assert_eq(largest.app_font_size.pixels(), 17.0)
   let (_, unchanged) = update(dispatch, FontSizeChanged("unknown"), model)
-  assert_true(unchanged.app_font_size is Medium)
+  assert_eq(unchanged.app_font_size, AppFontSize(14))
 }
 
 ///|
