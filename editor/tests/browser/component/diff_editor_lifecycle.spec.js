@@ -123,6 +123,28 @@ test('reveals raw mappings[0] when the first hunk starts on the cursor line', as
   await disposeDiffLifecycle(page);
 });
 
+test('reveals the final raw mapping for backward multi-diff navigation', async ({ page }) => {
+  const root = await openDiffLifecycle(page);
+  const modified = root.locator('.moonbit-diff-editor-modified');
+  await setDiffLifecycleFixture(page, 'first-line');
+  await waitForDiffLifecycleIdle(page);
+
+  await page.evaluate(() =>
+    globalThis.__diffEditorLifecycleControls.reveal_last_diff(),
+  );
+
+  await expect(
+    modified.locator('.line-numbers.active-line-number'),
+  ).toHaveText('100');
+  await expect(
+    modified.locator('.view-line').filter({
+      hasText: 'new second hunk at line 100',
+    }),
+  ).toBeVisible();
+
+  await disposeDiffLifecycle(page);
+});
+
 test('defers a one-shot first-diff reveal through computation and hidden layout', async ({ page }) => {
   const root = await openDiffLifecycle(page);
   const host = page.locator('.diff-lifecycle-host');

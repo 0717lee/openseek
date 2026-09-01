@@ -56,9 +56,11 @@ pub(all) struct DiffEditorOptions {
   diff_word_wrap : DiffWordWrap
   overview_ruler : Bool
   render_indicators : Bool
+  render_markdown_comments : Bool
+  handle_mouse_wheel : Bool
   ignore_trim_whitespace : Bool
 }
-pub fn DiffEditorOptions::DiffEditorOptions(layout? : DiffEditorLayout, automatic_inline? : Bool, automatic_inline_width? : Double, sash_enabled? : Bool, split_ratio? : Double, diff_word_wrap? : DiffWordWrap, overview_ruler? : Bool, render_indicators? : Bool, ignore_trim_whitespace? : Bool) -> Self
+pub fn DiffEditorOptions::DiffEditorOptions(layout? : DiffEditorLayout, automatic_inline? : Bool, automatic_inline_width? : Double, sash_enabled? : Bool, split_ratio? : Double, diff_word_wrap? : DiffWordWrap, overview_ruler? : Bool, render_indicators? : Bool, render_markdown_comments? : Bool, handle_mouse_wheel? : Bool, ignore_trim_whitespace? : Bool) -> Self
 pub fn DiffEditorOptions::default() -> Self
 
 pub struct DiffEditorViewModel {
@@ -128,7 +130,10 @@ pub struct DiffEditorWidget {
   mut original_alignment_geometry : PaneGeometrySnapshot?
   mut modified_alignment_geometry : PaneGeometrySnapshot?
   mut diff_state : DiffState?
+  did_change_content_height : @common.Emitter[Double]
+  mut last_published_content_height : Double?
   mut pending_reveal_first_diff_generation : Int?
+  mut pending_reveal_last_diff_generation : Int?
   mut reconciling_generation : Int
   mut is_reconciling : Bool
   layout_render_waiters : Array[@common.Disposable]
@@ -149,18 +154,25 @@ pub struct DiffEditorWidget {
 pub fn DiffEditorWidget::create(@dom.Element, services? : @code_editor_widget.CodeEditorServices, editor_options? : @code_editor_widget.CodeEditorOptions, options? : DiffEditorOptions, &@diff.DocumentDiffProvider) -> Self
 pub fn DiffEditorWidget::dispose(Self) -> Unit
 pub fn DiffEditorWidget::focus(Self) -> Unit
+pub fn DiffEditorWidget::get_content_height(Self) -> Double
 pub fn DiffEditorWidget::get_diff(Self) -> @diff.DocumentDiff?
 pub fn DiffEditorWidget::get_layout(Self) -> DiffEditorLayout
+pub fn DiffEditorWidget::get_max_scroll_left(Self) -> Double
 pub fn DiffEditorWidget::get_model(Self) -> DiffEditorModelData?
 pub fn DiffEditorWidget::is_diff_up_to_date(Self) -> Bool
 pub fn DiffEditorWidget::layout(Self) -> Unit
 pub fn DiffEditorWidget::lifecycle_snapshot(Self) -> DiffEditorWidgetLifecycleSnapshot
+pub fn DiffEditorWidget::on_did_change_content_height(Self, (Double) -> Unit) -> @common.Disposable
 pub fn DiffEditorWidget::on_did_update_diff(Self, () -> Unit) -> @common.Disposable
 pub fn DiffEditorWidget::reveal_first_diff(Self) -> Unit
+pub fn DiffEditorWidget::reveal_last_diff(Self) -> Unit
 pub fn DiffEditorWidget::reveal_next_change(Self) -> Bool
+pub fn DiffEditorWidget::reveal_next_change_without_wrap(Self) -> Bool
 pub fn DiffEditorWidget::reveal_previous_change(Self) -> Bool
+pub fn DiffEditorWidget::reveal_previous_change_without_wrap(Self) -> Bool
 pub fn DiffEditorWidget::set_diff_provider(Self, &@diff.DocumentDiffProvider) -> Unit
 pub fn DiffEditorWidget::set_model(Self, DiffEditorModelData?) -> DiffEditorModelData?
+pub fn DiffEditorWidget::set_scroll_left(Self, Double) -> Unit
 pub fn DiffEditorWidget::update_options(Self, @code_editor_widget.CodeEditorOptions, DiffEditorOptions) -> Unit
 
 pub(all) struct DiffEditorWidgetLifecycleSnapshot {

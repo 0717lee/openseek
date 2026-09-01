@@ -1,7 +1,7 @@
 ///|
-/// Algorithms offered by the optional MoonBit-aware provider. Core remains a
-/// first-class choice so one host-owned toolbar can keep a single provider
-/// instance while switching modes.
+/// MoonDiff mode selected by the desktop review host. Core is intentionally
+/// absent from the fragment provider below: Core continues to use the normal
+/// full-file DiffEditor provider.
 pub(all) enum MoonDiffMode {
   Core
   Token
@@ -9,181 +9,48 @@ pub(all) enum MoonDiffMode {
 } derive(Eq, Debug)
 
 ///|
-/// The result mode is host-visible product state. Tree can legitimately
-/// degrade to Token, while invalid specialized output degrades to Core.
-pub(all) struct MoonDiffStatus {
-  requested : MoonDiffMode
-  effective : MoonDiffMode
-  fell_back : Bool
+/// Immutable provider for one already-aligned MoonDiff fragment. A fragment
+/// is linear by construction; top-level ordering stays outside this provider
+/// and is represented by separate DiffEditor instances in the desktop host.
+pub struct MoonFragmentDiffProvider {
+  document : @diff.DocumentDiff
 } derive(Eq, Debug)
 
 ///|
-/// Optional synchronous provider used only by the desktop review host. The
-/// diff editor core depends exclusively on DocumentDiffProvider and therefore
-/// has no MoonDiff modes, controls, or fallback policy.
-pub struct MoonDocumentDiffProvider {
-  mut mode : MoonDiffMode
-  mut ignore_comments : Bool
-  mut status : MoonDiffStatus
-  did_change : @base_common.Emitter[Unit]
-  mut disposed : Bool
+pub fn MoonFragmentDiffProvider::MoonFragmentDiffProvider(
+  document : @diff.DocumentDiff,
+) -> MoonFragmentDiffProvider {
+  { document, }
 }
 
 ///|
-pub fn MoonDocumentDiffProvider::MoonDocumentDiffProvider(
-  mode? : MoonDiffMode = Core,
-  ignore_comments? : Bool = true,
-) -> MoonDocumentDiffProvider {
-  {
-    mode,
-    ignore_comments,
-    status: { requested: mode, effective: mode, fell_back: false, },
-    did_change: Emitter(),
-    disposed: false,
-  }
-}
-
-///|
-pub fn MoonDocumentDiffProvider::set_mode(
-  self : MoonDocumentDiffProvider,
-  mode : MoonDiffMode,
-) -> Unit {
-  if self.disposed || self.mode == mode {
-    return
-  }
-  self.mode = mode
-  self.status = { requested: mode, effective: mode, fell_back: false, }
-  self.did_change.fire(())
-}
-
-///|
-pub fn MoonDocumentDiffProvider::get_mode(
-  self : MoonDocumentDiffProvider,
-) -> MoonDiffMode {
-  self.mode
-}
-
-///|
-pub fn MoonDocumentDiffProvider::set_ignore_comments(
-  self : MoonDocumentDiffProvider,
-  ignore_comments : Bool,
-) -> Unit {
-  if self.disposed || self.ignore_comments == ignore_comments {
-    return
-  }
-  self.ignore_comments = ignore_comments
-  self.status = {
-    requested: self.mode,
-    effective: self.mode,
-    fell_back: false,
-  }
-  self.did_change.fire(())
-}
-
-///|
-pub fn MoonDocumentDiffProvider::get_ignore_comments(
-  self : MoonDocumentDiffProvider,
-) -> Bool {
-  self.ignore_comments
-}
-
-///|
-pub fn MoonDocumentDiffProvider::get_status(
-  self : MoonDocumentDiffProvider,
-) -> MoonDiffStatus {
-  self.status
-}
-
-///|
-/// Explicit host-facing coercion keeps the optional package independently
-/// checkable while exposing only the common diff contract to DiffEditor.
-pub fn MoonDocumentDiffProvider::as_document_diff_provider(
-  self : MoonDocumentDiffProvider,
+pub fn MoonFragmentDiffProvider::as_document_diff_provider(
+  self : MoonFragmentDiffProvider,
 ) -> &@diff.DocumentDiffProvider {
   self
 }
 
 ///|
-pub fn MoonDocumentDiffProvider::dispose(
-  self : MoonDocumentDiffProvider,
-) -> Unit {
-  if self.disposed {
-    return
-  }
-  self.disposed = true
-  self.did_change.dispose()
+pub impl @diff.DocumentDiffProvider for MoonFragmentDiffProvider with fn compute_diff(
+  self,
+  _original,
+  _modified,
+  _options,
+) {
+  self.document
 }
 
 ///|
-fn snapshot_lines(snapshot : @model.TextSnapshot) -> Array[String] {
-  let lines = []
-  for line_number in 1..<=snapshot.line_count() {
-    lines.push(snapshot.get_line_content(line_number))
-  }
-  lines
+pub impl @diff.DocumentDiffProvider for MoonFragmentDiffProvider with fn on_did_change(
+  _self,
+  _listener,
+) {
+  @base_common.Disposable::from(() => ())
 }
 
 ///|
-fn same_line_change_shape(
-  first : @diff.DocumentDiff,
-  second : @diff.DocumentDiff,
-) -> Bool {
-  if first.changes.length() != second.changes.length() {
-    return false
-  }
-  for index in 0..<first.changes.length() {
-    if first.changes[index].original != second.changes[index].original ||
-      first.changes[index].modified != second.changes[index].modified {
-      return false
-    }
-  }
-  true
-}
-
-///|
-fn edge_whitespace_signature(line : String) -> (Array[Int], Array[Int]) {
-  let leading : Array[Int] = []
-  let trailing : Array[Int] = []
-  let mut saw_content = false
-  for character in line {
-    if character.is_whitespace() {
-      if saw_content {
-        trailing.push(character.to_int())
-      } else {
-        leading.push(character.to_int())
-      }
-    } else {
-      saw_content = true
-      trailing.clear()
-    }
-  }
-  (leading, trailing)
-}
-
-///|
-fn paired_change_has_edge_whitespace_difference(
-  strict : @diff.DocumentDiff,
-  original : @model.TextSnapshot,
-  modified : @model.TextSnapshot,
-) -> Bool {
-  for change in strict.changes {
-    if change.original.length() != change.modified.length() {
-      continue
-    }
-    for offset in 0..<change.original.length() {
-      let original_line = original.get_line_content(
-        change.original.start_line_number + offset,
-      )
-      let modified_line = modified.get_line_content(
-        change.modified.start_line_number + offset,
-      )
-      if edge_whitespace_signature(original_line) !=
-        edge_whitespace_signature(modified_line) {
-        return true
-      }
-    }
-  }
-  false
+fn source_lines(source : String) -> Array[String] {
+  source.split("\n").map(line => line.to_owned()).collect()
 }
 
 ///|
@@ -192,8 +59,8 @@ fn valid_hunk_range(start : Int, len : Int, total : Int) -> Bool {
 }
 
 ///|
-fn valid_line(
-  line : @tokdiff.DiffLine,
+fn valid_fragment_line(
+  line : @mbtdiff.DiffLine,
   expected_index : Int,
   source : Array[String],
 ) -> Bool {
@@ -204,15 +71,13 @@ fn valid_line(
 }
 
 ///|
-fn changed_ranges(line : @tokdiff.DiffLine) -> Array[@base_common.Range] {
-  let ranges = []
+fn changed_ranges(line : @mbtdiff.DiffLine) -> Array[@base_common.Range] {
+  let ranges : Array[@base_common.Range] = []
   let mut column = 1
   for segment in line.segments {
     let end_column = column + segment.text.length()
     if segment.kind is Changed && end_column > column {
-      ranges.push(
-        @base_common.Range(line.index + 1, column, line.index + 1, end_column),
-      )
+      ranges.push(Range(line.index + 1, column, line.index + 1, end_column))
     }
     column = end_column
   }
@@ -220,20 +85,57 @@ fn changed_ranges(line : @tokdiff.DiffLine) -> Array[@base_common.Range] {
 }
 
 ///|
+fn line_end_anchor(line : @mbtdiff.DiffLine) -> @base_common.Range {
+  let column = line.text().length() + 1
+  Range(line.index + 1, column, line.index + 1, column)
+}
+
+///|
+fn cursor_anchor(lines : Array[String], cursor : Int) -> @base_common.Range {
+  if lines.is_empty() {
+    return Range(1, 1, 1, 1)
+  }
+  if cursor < lines.length() {
+    let line_number = cursor.max(0) + 1
+    return Range(line_number, 1, line_number, 1)
+  }
+  let line_number = lines.length()
+  let column = lines[line_number - 1].length() + 1
+  Range(line_number, column, line_number, column)
+}
+
+///|
+/// Preserve every changed segment. When one side has more changed spans than
+/// the other, the surplus spans map to the opposite line end instead of being
+/// dropped. This is local intraline geometry, not a synthesized top-level
+/// ordering.
 fn paired_inner_changes(
-  original : @tokdiff.DiffLine,
-  modified : @tokdiff.DiffLine,
+  original : @mbtdiff.DiffLine,
+  modified : @mbtdiff.DiffLine,
 ) -> Array[@diff.RangeMapping]? {
   let original_ranges = changed_ranges(original)
   let modified_ranges = changed_ranges(modified)
-  if original_ranges.is_empty() || modified_ranges.is_empty() {
-    return None
+  if original_ranges.is_empty() && modified_ranges.is_empty() {
+    return Some([])
   }
-  let mappings = []
-  let count = original_ranges.length().min(modified_ranges.length())
+  let mappings : Array[@diff.RangeMapping] = []
+  let count = original_ranges.length().max(modified_ranges.length())
+  let original_anchor = line_end_anchor(original)
+  let modified_anchor = line_end_anchor(modified)
   for index in 0..<count {
     mappings.push(
-      @diff.RangeMapping(original_ranges[index], modified_ranges[index]),
+      RangeMapping(
+        if index < original_ranges.length() {
+          original_ranges[index]
+        } else {
+          original_anchor
+        },
+        if index < modified_ranges.length() {
+          modified_ranges[index]
+        } else {
+          modified_anchor
+        },
+      ),
     )
   }
   Some(mappings)
@@ -241,8 +143,8 @@ fn paired_inner_changes(
 
 ///|
 fn paired_change(
-  original : @tokdiff.DiffLine,
-  modified : @tokdiff.DiffLine,
+  original : @mbtdiff.DiffLine,
+  modified : @mbtdiff.DiffLine,
 ) -> @diff.DetailedLineRangeMapping {
   DetailedLineRangeMapping(
     LineRange(original.index + 1, original.index + 2),
@@ -253,30 +155,42 @@ fn paired_change(
 
 ///|
 fn old_only_change(
-  original : @tokdiff.DiffLine,
+  original : @mbtdiff.DiffLine,
   modified_cursor : Int,
+  modified_lines : Array[String],
 ) -> @diff.DetailedLineRangeMapping {
+  let anchor = cursor_anchor(modified_lines, modified_cursor)
   DetailedLineRangeMapping(
     LineRange(original.index + 1, original.index + 2),
     LineRange(modified_cursor + 1, modified_cursor + 1),
-    None,
+    Some(
+      changed_ranges(original).map(original_range => {
+        RangeMapping(original_range, anchor)
+      }),
+    ),
   )
 }
 
 ///|
 fn new_only_change(
-  modified : @tokdiff.DiffLine,
+  modified : @mbtdiff.DiffLine,
   original_cursor : Int,
+  original_lines : Array[String],
 ) -> @diff.DetailedLineRangeMapping {
+  let anchor = cursor_anchor(original_lines, original_cursor)
   DetailedLineRangeMapping(
     LineRange(original_cursor + 1, original_cursor + 1),
     LineRange(modified.index + 1, modified.index + 2),
-    None,
+    Some(
+      changed_ranges(modified).map(modified_range => {
+        RangeMapping(anchor, modified_range)
+      }),
+    ),
   )
 }
 
 ///|
-fn line_ranges_intersect_or_touch(
+fn ranges_touch(
   left : @base_common.LineRange,
   right : @base_common.LineRange,
 ) -> Bool {
@@ -285,32 +199,30 @@ fn line_ranges_intersect_or_touch(
 }
 
 ///|
-// MoonDiff exposes changed rows. VS Code's renderer consumes grouped
-// DetailedLineRangeMappings, so touching rows must be joined before the
-// provider result crosses that boundary.
-fn append_coalesced_change(
+fn append_change(
   changes : Array[@diff.DetailedLineRangeMapping],
   change : @diff.DetailedLineRangeMapping,
 ) -> Unit {
-  if changes.is_empty() {
+  guard !changes.is_empty() else {
     changes.push(change)
     return
   }
-  let previous = changes[changes.length() - 1]
-  if !line_ranges_intersect_or_touch(previous.original, change.original) &&
-    !line_ranges_intersect_or_touch(previous.modified, change.modified) {
+  let index = changes.length() - 1
+  let previous = changes[index]
+  if !ranges_touch(previous.original, change.original) &&
+    !ranges_touch(previous.modified, change.modified) {
     changes.push(change)
     return
   }
   let inner_changes = match (previous.inner_changes, change.inner_changes) {
-    (Some(previous_inner), Some(change_inner)) => {
-      let joined = previous_inner.copy()
-      joined.append(change_inner)
+    (Some(first), Some(second)) => {
+      let joined = first.copy()
+      joined.append(second)
       Some(joined)
     }
     _ => None
   }
-  changes[changes.length() - 1] = DetailedLineRangeMapping(
+  changes[index] = DetailedLineRangeMapping(
     previous.original.join(change.original),
     previous.modified.join(change.modified),
     inner_changes,
@@ -318,30 +230,31 @@ fn append_coalesced_change(
 }
 
 ///|
-fn append_coalesced_alignment(
+fn append_alignment(
   alignments : Array[@diff.LineRangeMapping],
   alignment : @diff.LineRangeMapping,
 ) -> Unit {
-  if alignments.is_empty() {
+  guard !alignments.is_empty() else {
     alignments.push(alignment)
     return
   }
-  let previous = alignments[alignments.length() - 1]
-  if !line_ranges_intersect_or_touch(previous.original, alignment.original) &&
-    !line_ranges_intersect_or_touch(previous.modified, alignment.modified) {
+  let index = alignments.length() - 1
+  let previous = alignments[index]
+  if !ranges_touch(previous.original, alignment.original) &&
+    !ranges_touch(previous.modified, alignment.modified) {
     alignments.push(alignment)
     return
   }
-  alignments[alignments.length() - 1] = LineRangeMapping(
+  alignments[index] = LineRangeMapping(
     previous.original.join(alignment.original),
     previous.modified.join(alignment.modified),
   )
 }
 
 ///|
-fn append_rows(
-  rows : Array[@tokdiff.DiffRow],
-  render_changes : Bool,
+fn append_fragment_rows(
+  rows : ArrayView[@mbtdiff.DiffRow],
+  visible : Bool,
   original_lines : Array[String],
   modified_lines : Array[String],
   original_cursor : Int,
@@ -351,48 +264,42 @@ fn append_rows(
 ) -> (Int, Int)? {
   let mut old_cursor = original_cursor
   let mut new_cursor = modified_cursor
-  // A ChangeBlock or IgnoredBlock is a coalescing boundary. Keeping its rows
-  // local prevents an empty-side anchor from joining mappings across the other
-  // block kind and making a geometry-only alignment overlap a real change.
-  let block_changes = []
-  let block_alignments = []
+  let block_changes : Array[@diff.DetailedLineRangeMapping] = []
+  let block_alignments : Array[@diff.LineRangeMapping] = []
   for row in rows {
     match row {
       Paired(original, modified) => {
-        if !valid_line(original, old_cursor, original_lines) ||
-          !valid_line(modified, new_cursor, modified_lines) {
+        if !valid_fragment_line(original, old_cursor, original_lines) ||
+          !valid_fragment_line(modified, new_cursor, modified_lines) {
           return None
         }
-        if render_changes {
-          append_coalesced_change(
-            block_changes,
-            paired_change(original, modified),
-          )
+        if visible {
+          append_change(block_changes, paired_change(original, modified))
         }
         old_cursor += 1
         new_cursor += 1
       }
       OldOnly(original) => {
-        if !valid_line(original, old_cursor, original_lines) {
+        if !valid_fragment_line(original, old_cursor, original_lines) {
           return None
         }
-        let mapping = old_only_change(original, new_cursor)
-        if render_changes {
-          append_coalesced_change(block_changes, mapping)
+        let change = old_only_change(original, new_cursor, modified_lines)
+        if visible {
+          append_change(block_changes, change)
         } else {
-          append_coalesced_alignment(block_alignments, mapping.line_mapping())
+          append_alignment(block_alignments, change.line_mapping())
         }
         old_cursor += 1
       }
       NewOnly(modified) => {
-        if !valid_line(modified, new_cursor, modified_lines) {
+        if !valid_fragment_line(modified, new_cursor, modified_lines) {
           return None
         }
-        let mapping = new_only_change(modified, old_cursor)
-        if render_changes {
-          append_coalesced_change(block_changes, mapping)
+        let change = new_only_change(modified, old_cursor, original_lines)
+        if visible {
+          append_change(block_changes, change)
         } else {
-          append_coalesced_alignment(block_alignments, mapping.line_mapping())
+          append_alignment(block_alignments, change.line_mapping())
         }
         new_cursor += 1
       }
@@ -404,13 +311,13 @@ fn append_rows(
 }
 
 ///|
-fn adapt_document(
-  document : @tokdiff.DiffDocument,
+fn adapt_fragment_document(
+  document : @mbtdiff.HunkDocument,
   original_lines : Array[String],
   modified_lines : Array[String],
 ) -> @diff.DocumentDiff? {
-  let changes = []
-  let alignments = []
+  let changes : Array[@diff.DetailedLineRangeMapping] = []
+  let alignments : Array[@diff.LineRangeMapping] = []
   for hunk in document.hunks {
     if !valid_hunk_range(hunk.old_start, hunk.old_len, original_lines.length()) ||
       !valid_hunk_range(hunk.new_start, hunk.new_len, modified_lines.length()) {
@@ -433,30 +340,23 @@ fn adapt_document(
             old_cursor += 1
             new_cursor += 1
           }
-        ChangeBlock(rows) =>
-          match
-            append_rows(
-              rows, true, original_lines, modified_lines, old_cursor, new_cursor,
-              changes, alignments,
-            ) {
-            Some((next_old, next_new)) => {
-              old_cursor = next_old
-              new_cursor = next_new
-            }
-            None => return None
+        ChangeBlock(rows) | IgnoredBlock(rows) => {
+          guard append_fragment_rows(
+              rows,
+              block is ChangeBlock(_),
+              original_lines,
+              modified_lines,
+              old_cursor,
+              new_cursor,
+              changes,
+              alignments,
+            )
+            is Some((next_old, next_new)) else {
+            return None
           }
-        IgnoredBlock(rows) =>
-          match
-            append_rows(
-              rows, false, original_lines, modified_lines, old_cursor, new_cursor,
-              changes, alignments,
-            ) {
-            Some((next_old, next_new)) => {
-              old_cursor = next_old
-              new_cursor = next_new
-            }
-            None => return None
-          }
+          old_cursor = next_old
+          new_cursor = next_new
+        }
       }
     }
     if old_cursor != hunk.old_start + hunk.old_len ||
@@ -468,156 +368,24 @@ fn adapt_document(
 }
 
 ///|
-fn specialized_diff(
-  mode : MoonDiffMode,
-  ignore_comments : Bool,
-  original : @model.TextSnapshot,
-  modified : @model.TextSnapshot,
-) -> (@diff.DocumentDiff, MoonDiffMode, Bool)? {
-  let original_lines = snapshot_lines(original)
-  let modified_lines = snapshot_lines(modified)
-  let (document, effective, fell_back) = match mode {
-    Core => return None
-    Token =>
-      (
-        @tokdiff.diff(
-          old=original_lines,
-          new=modified_lines,
-          context=0,
-          line_cleanup=true,
-          ignore_comments~,
-        ),
-        Token,
-        false,
-      )
-    Tree => {
-      let result = @mbtdiff.diff(
-        original.get_value(),
-        modified.get_value(),
-        options=@mbtdiff.DiffOptions::new(context_lines=0, ignore_comments~),
-      )
-      (
-        result.document(),
-        if result.has_fallback() {
-          Token
-        } else {
-          Tree
-        },
-        result.has_fallback(),
-      )
-    }
-  }
-  guard adapt_document(document, original_lines, modified_lines) is Some(diff) else {
+/// Convert exactly one MoonDiff fragment into the common DiffEditor contract.
+/// No top-level ranges are rebased, sorted, padded, or flattened here.
+fn fragment_document_diff(
+  document : @mbtdiff.HunkDocument,
+  original_source : String,
+  modified_source : String,
+) -> @diff.DocumentDiff? {
+  let original : @model.TextSnapshot = TextSnapshot(original_source)
+  let modified : @model.TextSnapshot = TextSnapshot(modified_source)
+  guard adapt_fragment_document(
+      document,
+      source_lines(original_source),
+      source_lines(modified_source),
+    )
+    is Some(candidate) else {
     return None
   }
-  // Token has no typed failure channel. A differing source cannot silently
-  // become an empty comparison unless ignored rows explain the geometry.
-  if original_lines != modified_lines &&
-    diff.changes.is_empty() &&
-    diff.additional_alignments.is_empty() {
-    if !ignore_comments {
-      return None
-    }
-    let unfiltered = @tokdiff.diff(
-      old=original_lines,
-      new=modified_lines,
-      context=0,
-      line_cleanup=true,
-      ignore_comments=false,
-    )
-    guard adapt_document(unfiltered, original_lines, modified_lines)
-      is Some(unfiltered_diff) &&
-      !unfiltered_diff.changes.is_empty() else {
-      return None
-    }
-    let ignored_alignments = unfiltered_diff.changes.filter_map(change => {
-      if change.original.length() != change.modified.length() {
-        Some(change.line_mapping())
-      } else {
-        None
-      }
-    })
-    let result : @diff.DocumentDiff = {
-      changes: [],
-      additional_alignments: ignored_alignments,
-    }
-    return Some((result, effective, fell_back))
-  }
-  Some((diff, effective, fell_back))
-}
-
-///|
-fn MoonDocumentDiffProvider::settle_specialized_or_core(
-  self : MoonDocumentDiffProvider,
-  requested : MoonDiffMode,
-  specialized : (@diff.DocumentDiff, MoonDiffMode, Bool)?,
-  core_fallback : @diff.DocumentDiff,
-  original : @model.TextSnapshot,
-  modified : @model.TextSnapshot,
-) -> @diff.DocumentDiff {
-  match specialized {
-    Some((candidate, effective, fell_back)) =>
-      match
-        @diff.normalize_and_validate_document_diff(
-          candidate, original, modified,
-        ) {
-        Some(result) => {
-          self.status = { requested, effective, fell_back, }
-          return result
-        }
-        None => ()
-      }
-    None => ()
-  }
-  self.status = { requested, effective: Core, fell_back: requested != Core, }
-  core_fallback
-}
-
-///|
-pub impl @diff.DocumentDiffProvider for MoonDocumentDiffProvider with fn compute_diff(
-  self,
-  original,
-  modified,
-  options,
-) {
-  let requested = self.mode
-  if requested != Core {
-    let core = @diff.CoreDocumentDiffProvider()
-    let strict = core.compute_diff(original, modified, {
-      ignore_trim_whitespace: false,
-    })
-    let lenient = core.compute_diff(original, modified, {
-      ignore_trim_whitespace: true,
-    })
-    if !same_line_change_shape(strict, lenient) ||
-      paired_change_has_edge_whitespace_difference(strict, original, modified) {
-      self.status = { requested, effective: Core, fell_back: true, }
-      return if options.ignore_trim_whitespace { lenient } else { strict }
-    }
-    return self.settle_specialized_or_core(
-      requested,
-      specialized_diff(requested, self.ignore_comments, original, modified),
-      if options.ignore_trim_whitespace {
-        lenient
-      } else {
-        strict
-      },
-      original,
-      modified,
-    )
-  }
-  let core = @diff.CoreDocumentDiffProvider().compute_diff(
-    original, modified, options,
-  )
-  self.settle_specialized_or_core(requested, None, core, original, modified)
-}
-
-///|
-pub impl @diff.DocumentDiffProvider for MoonDocumentDiffProvider with fn on_did_change(
-  self,
-  listener,
-) {
-  self.did_change.event(_ => listener())
+  @diff.normalize_and_validate_document_diff(candidate, original, modified)
 }
 
 ///|
@@ -625,9 +393,3 @@ pub extend MoonDiffMode with Eq::{equal, not_equal}
 
 ///|
 pub extend MoonDiffMode with Debug::{to_repr}
-
-///|
-pub extend MoonDiffStatus with Eq::{equal, not_equal}
-
-///|
-pub extend MoonDiffStatus with Debug::{to_repr}

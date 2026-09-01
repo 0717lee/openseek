@@ -37,11 +37,20 @@ pub struct DiffEditorWidget {
   mut original_alignment_geometry : PaneGeometrySnapshot?
   mut modified_alignment_geometry : PaneGeometrySnapshot?
   mut diff_state : DiffState?
+  /// The section-host contract is published only after one complete geometry
+  /// reconcile has committed both panes' owned alignment zones. Retaining the
+  /// last value prevents a host height write followed by `layout()` from
+  /// feeding the same height back into the host.
+  did_change_content_height : @base_common.Emitter[Double]
+  mut last_published_content_height : Double?
   /// One VS Code-style `revealFirstDiff` request, bound to the model-pair
   /// generation that was current when the host made it. The request survives
   /// asynchronous diff computation and hidden/layout render barriers, but a
   /// replacement pair makes it stale instead of moving the new document.
   mut pending_reveal_first_diff_generation : Int?
+  /// Symmetric request used when a multi-diff host enters this item while
+  /// navigating backward.
+  mut pending_reveal_last_diff_generation : Int?
   mut reconciling_generation : Int
   mut is_reconciling : Bool
   /// Cancellable paint barrier for the latest outer layout transaction.
@@ -171,6 +180,8 @@ pub fn DiffEditorWidget::create(
     editor_options,
     options.diff_word_wrap,
     options.layout,
+    options.render_markdown_comments,
+    options.handle_mouse_wheel,
   )
   let view_model = DiffEditorViewModel(provider, options={
     ignore_trim_whitespace: options.ignore_trim_whitespace,
@@ -204,7 +215,10 @@ pub fn DiffEditorWidget::create(
     original_alignment_geometry: None,
     modified_alignment_geometry: None,
     diff_state: None,
+    did_change_content_height: Emitter(),
+    last_published_content_height: None,
     pending_reveal_first_diff_generation: None,
+    pending_reveal_last_diff_generation: None,
     reconciling_generation: 0,
     is_reconciling: false,
     layout_render_waiters: [],
@@ -1209,11 +1223,13 @@ fn DiffEditorWidget::commit_diff_state(
 fn DiffEditorWidget::reconcile_geometry_if_changed(
   self : DiffEditorWidget,
 ) -> Unit {
-  if self.disposed ||
-    self.editors.is_committing_model_pair() ||
-    self.is_reconciling ||
-    self.diff_state is None ||
-    self.view_model.get_diff() is None {
+  // Always re-enter through the paired transaction. Besides committing both
+  // sides' derived alignment zones, `reconcile_view_model` owns the pane-render
+  // barrier, positive-layout, model-pair, and generation fences. Publishing
+  // directly from this child event would expose the exact one-pane
+  // intermediate state this event is designed to hide.
+  if self.diff_state is None || self.view_model.get_diff() is None {
+    self.reconcile_view_model()
     return
   }
   let (original, modified) = self.capture_alignment_geometry()
@@ -1223,10 +1239,35 @@ fn DiffEditorWidget::reconcile_geometry_if_changed(
     self.original_alignment_geometry,
     self.modified_alignment_geometry,
   )
-  if !geometry_changed {
+  let content_height = self.get_content_height()
+  let content_height_changed = content_height > 0.0 &&
+    self.last_published_content_height != Some(content_height)
+  if geometry_changed || content_height_changed {
+    // Even the content-height-only path must cross the complete reconciliation
+    // gate; it must never publish directly from one child editor.
+    self.reconcile_view_model()
+  }
+}
+
+///|
+/// Publish the final paired height, never an intermediate child-editor height.
+/// In particular, a Markdown-comment ViewZone first changes one pane, then the
+/// diff geometry transaction replaces alignment zones in both panes. This
+/// method runs only after that transaction and updates the retained value
+/// before firing so a synchronous host resize cannot re-enter with a duplicate.
+fn DiffEditorWidget::publish_content_height_if_changed(
+  self : DiffEditorWidget,
+) -> Unit {
+  if self.disposed {
     return
   }
-  self.reconcile_view_model()
+  let content_height = self.get_content_height()
+  if content_height <= 0.0 ||
+    self.last_published_content_height == Some(content_height) {
+    return
+  }
+  self.last_published_content_height = Some(content_height)
+  self.did_change_content_height.fire(content_height)
 }
 
 ///|
@@ -1255,6 +1296,10 @@ fn DiffEditorWidget::reconcile_view_model(self : DiffEditorWidget) -> Unit {
   self.is_reconciling = true
   defer {
     self.is_reconciling = false
+    // `commit_diff_state` has now replaced both sides' alignment zones. A
+    // section host can synchronously adopt this height without observing the
+    // one-pane Markdown/ViewZone intermediate state.
+    self.publish_content_height_if_changed()
   }
   self.reconciling_generation += 1
   let generation = self.reconciling_generation
@@ -1262,11 +1307,13 @@ fn DiffEditorWidget::reconcile_view_model(self : DiffEditorWidget) -> Unit {
     self.view_model.get_model() is Some(model) else {
     self.commit_empty_diff_features(generation)
     self.try_reveal_first_diff()
+    self.try_reveal_last_diff()
     return
   }
   let diff_state = DiffState::from_diff_result(document_diff)
   self.commit_diff_state(diff_state, model, generation)
   self.try_reveal_first_diff()
+  self.try_reveal_last_diff()
 }
 
 ///|
@@ -1302,6 +1349,7 @@ pub fn DiffEditorWidget::set_model(
     return None
   }
   self.pending_reveal_first_diff_generation = None
+  self.pending_reveal_last_diff_generation = None
   self.pending_layout_modified_viewport = None
   self.clear_pending_scroll_echoes()
   self.clear_diff_features_for_transition()
@@ -1382,10 +1430,12 @@ pub fn DiffEditorWidget::update_options(
       editor_options,
       options.diff_word_wrap,
       self.layout_state.actual_layout,
+      options.handle_mouse_wheel,
     )
     self.apply_layout_dom()
     self.editors.sync_markdown_comment_presentations(
       self.layout_state.actual_layout,
+      options.render_markdown_comments,
     )
     self.layout_editors_after_render()
   }
@@ -1399,6 +1449,50 @@ pub fn DiffEditorWidget::get_layout(
   self : DiffEditorWidget,
 ) -> DiffEditorLayout {
   self.layout_state.actual_layout
+}
+
+///|
+/// Total height required by the taller pane, including diff alignment view
+/// zones. Hosts that stack independent DiffEditors use this to size each
+/// section without introducing a nested vertical scrollbar.
+pub fn DiffEditorWidget::get_content_height(self : DiffEditorWidget) -> Double {
+  self.editors.original
+  .get_content_height()
+  .max(self.editors.modified.get_content_height())
+}
+
+///|
+/// Fires after a complete paired geometry transaction changes the final
+/// content height. The payload already includes Markdown/foreign ViewZones and
+/// both panes' committed alignment zones.
+pub fn DiffEditorWidget::on_did_change_content_height(
+  self : DiffEditorWidget,
+  listener : (Double) -> Unit,
+) -> @base_common.Disposable {
+  self.did_change_content_height.event(listener)
+}
+
+///|
+/// Largest horizontal overflow of either code pane. MultiDiffEditor uses one
+/// outer horizontal scrollbar and projects its offset into every item, just as
+/// VS Code's DiffEditorItemTemplate reports `maxScroll` to its parent widget.
+pub fn DiffEditorWidget::get_max_scroll_left(self : DiffEditorWidget) -> Double {
+  let original = (self.editors.original.get_scroll_width() -
+  self.editors.original.get_layout_info().content_width).max(0.0)
+  let modified = (self.editors.modified.get_scroll_width() -
+  self.editors.modified.get_layout_info().content_width).max(0.0)
+  original.max(modified)
+}
+
+///|
+/// Apply the MultiDiffEditor's shared horizontal offset to both panes. The
+/// existing pane synchronization absorbs any resulting scroll event echo.
+pub fn DiffEditorWidget::set_scroll_left(
+  self : DiffEditorWidget,
+  scroll_left : Double,
+) -> Unit {
+  self.editors.original.set_scroll_left(scroll_left)
+  self.editors.modified.set_scroll_left(scroll_left)
 }
 
 ///|
@@ -1603,6 +1697,49 @@ pub fn DiffEditorWidget::reveal_first_diff(self : DiffEditorWidget) -> Unit {
 }
 
 ///|
+/// Consume a deferred final-diff request under the same model/layout fences as
+/// `reveal_first_diff`.
+fn DiffEditorWidget::try_reveal_last_diff(self : DiffEditorWidget) -> Unit {
+  guard self.pending_reveal_last_diff_generation is Some(generation) else {
+    return
+  }
+  if self.editors.committed_model_generation() != generation ||
+    !self.editors.same_model(self.view_model.get_model()) {
+    self.pending_reveal_last_diff_generation = None
+    return
+  }
+  match self.view_model.get_state() {
+    Pending => return
+    NoModel | Failed => {
+      self.pending_reveal_last_diff_generation = None
+      return
+    }
+    Ready => ()
+  }
+  guard self.diff_state is Some(diff_state) else { return }
+  self.pending_reveal_last_diff_generation = None
+  guard !diff_state.mappings.is_empty() else { return }
+  self.reveal_change(
+    diff_state.mappings[diff_state.mappings.length() - 1].line_range_mapping,
+    source="diffEditor.revealLastDiff",
+  )
+  |> ignore
+}
+
+///|
+/// Request a one-shot reveal of the current comparison's final raw mapping.
+/// Multi-diff hosts use this when Shift+F7 crosses into the previous item.
+pub fn DiffEditorWidget::reveal_last_diff(self : DiffEditorWidget) -> Unit {
+  if self.disposed || self.view_model.get_model() is None {
+    return
+  }
+  self.pending_reveal_last_diff_generation = Some(
+    self.editors.committed_model_generation(),
+  )
+  self.try_reveal_last_diff()
+}
+
+///|
 pub fn DiffEditorWidget::reveal_next_change(self : DiffEditorWidget) -> Bool {
   guard self.view_model.get_model() is Some(model) else { return false }
   let current_line = self.editors.modified
@@ -1620,6 +1757,23 @@ pub fn DiffEditorWidget::reveal_next_change(self : DiffEditorWidget) -> Bool {
 }
 
 ///|
+/// Reveal the next change only when it remains inside this comparison. A
+/// multi-diff host uses `false` as the signal to advance to its next item.
+pub fn DiffEditorWidget::reveal_next_change_without_wrap(
+  self : DiffEditorWidget,
+) -> Bool {
+  let current_line = self.editors.modified
+    .get_position()
+    .map_or(1, position => position.line_number)
+  guard self.diff_state is Some(diff_state) &&
+    diff_state.next_change_from_modified_line_without_wrap(current_line)
+    is Some(target) else {
+    return false
+  }
+  self.reveal_navigation_target(target)
+}
+
+///|
 pub fn DiffEditorWidget::reveal_previous_change(
   self : DiffEditorWidget,
 ) -> Bool {
@@ -1628,6 +1782,22 @@ pub fn DiffEditorWidget::reveal_previous_change(
     .map_or(1, position => position.line_number)
   guard self.diff_state is Some(diff_state) &&
     diff_state.previous_change_from_modified_line(current_line) is Some(target) else {
+    return false
+  }
+  self.reveal_navigation_target(target)
+}
+
+///|
+/// Reveal the previous change only when it remains inside this comparison.
+pub fn DiffEditorWidget::reveal_previous_change_without_wrap(
+  self : DiffEditorWidget,
+) -> Bool {
+  let current_line = self.editors.modified
+    .get_position()
+    .map_or(1, position => position.line_number)
+  guard self.diff_state is Some(diff_state) &&
+    diff_state.previous_change_from_modified_line_without_wrap(current_line)
+    is Some(target) else {
     return false
   }
   self.reveal_navigation_target(target)
@@ -1721,10 +1891,12 @@ pub fn DiffEditorWidget::layout(self : DiffEditorWidget) -> Unit {
     self.editor_options,
     self.options.diff_word_wrap,
     self.layout_state.actual_layout,
+    self.options.handle_mouse_wheel,
   )
   self.apply_layout_dom()
   self.editors.sync_markdown_comment_presentations(
     self.layout_state.actual_layout,
+    self.options.render_markdown_comments,
   )
   self.layout_editors_after_render()
 }
@@ -1783,12 +1955,15 @@ pub fn DiffEditorWidget::dispose(self : DiffEditorWidget) -> Unit {
   self.original_alignment_geometry = None
   self.modified_alignment_geometry = None
   self.diff_state = None
+  self.last_published_content_height = None
   self.pending_reveal_first_diff_generation = None
+  self.pending_reveal_last_diff_generation = None
   self.reconciling_generation = 0
   self.is_reconciling = false
   self.layout_render_generation = 0
   self.has_valid_layout_box = false
   self.inline_original_strip_width = -1.0
   self.clear_pending_scroll_echoes()
+  self.did_change_content_height.dispose()
   self.host.remove_child(self.root.as_node())
 }

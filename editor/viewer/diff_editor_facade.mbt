@@ -39,6 +39,8 @@ struct DiffEditorOptions {
   diff_word_wrap : DiffWordWrap
   overview_ruler : Bool
   render_indicators : Bool
+  render_markdown_comments : Bool
+  handle_mouse_wheel : Bool
   ignore_trim_whitespace : Bool
 }
 
@@ -55,6 +57,8 @@ pub fn DiffEditorOptions::DiffEditorOptions(
   diff_word_wrap? : DiffWordWrap = Inherit,
   overview_ruler? : Bool = true,
   render_indicators? : Bool = true,
+  render_markdown_comments? : Bool = true,
+  handle_mouse_wheel? : Bool = true,
   ignore_trim_whitespace? : Bool = true,
 ) -> DiffEditorOptions {
   {
@@ -67,6 +71,8 @@ pub fn DiffEditorOptions::DiffEditorOptions(
     diff_word_wrap,
     overview_ruler,
     render_indicators,
+    render_markdown_comments,
+    handle_mouse_wheel,
     ignore_trim_whitespace,
   }
 }
@@ -138,6 +144,8 @@ fn DiffEditorOptions::internal(
     diff_word_wrap=self.diff_word_wrap.internal(),
     overview_ruler=self.overview_ruler,
     render_indicators=self.render_indicators,
+    render_markdown_comments=self.render_markdown_comments,
+    handle_mouse_wheel=self.handle_mouse_wheel,
     ignore_trim_whitespace=self.ignore_trim_whitespace,
   )
 }
@@ -232,6 +240,37 @@ pub fn DiffEditor::get_layout(self : DiffEditor) -> DiffEditorLayout {
 }
 
 ///|
+/// Total height required by the taller diff pane, including alignment zones.
+pub fn DiffEditor::get_content_height(self : DiffEditor) -> Double {
+  self.widget.get_content_height()
+}
+
+///|
+/// Fires when a complete paired geometry reconciliation changes the final
+/// maximum content height, after derived alignment zones have committed.
+pub fn DiffEditor::on_did_change_content_height(
+  self : DiffEditor,
+  listener : (Double) -> Unit,
+) -> @base_common.Disposable {
+  self.widget.on_did_change_content_height(listener)
+}
+
+///|
+/// Horizontal overflow exposed for VS Code-shaped MultiDiffEditor hosts.
+pub fn DiffEditor::get_max_scroll_left(self : DiffEditor) -> Double {
+  self.widget.get_max_scroll_left()
+}
+
+///|
+/// Set the shared horizontal offset of both diff panes.
+pub fn DiffEditor::set_scroll_left(
+  self : DiffEditor,
+  scroll_left : Double,
+) -> Unit {
+  self.widget.set_scroll_left(scroll_left)
+}
+
+///|
 pub fn DiffEditor::get_diff(self : DiffEditor) -> @diff.DocumentDiff? {
   self.widget.get_diff()
 }
@@ -258,13 +297,33 @@ pub fn DiffEditor::reveal_first_diff(self : DiffEditor) -> Unit {
 }
 
 ///|
+/// Reveal the final raw diff mapping once the current comparison is ready.
+pub fn DiffEditor::reveal_last_diff(self : DiffEditor) -> Unit {
+  self.widget.reveal_last_diff()
+}
+
+///|
 pub fn DiffEditor::reveal_next_change(self : DiffEditor) -> Bool {
   self.widget.reveal_next_change()
 }
 
 ///|
+/// Reveal the next change only when it remains inside this comparison.
+pub fn DiffEditor::reveal_next_change_without_wrap(self : DiffEditor) -> Bool {
+  self.widget.reveal_next_change_without_wrap()
+}
+
+///|
 pub fn DiffEditor::reveal_previous_change(self : DiffEditor) -> Bool {
   self.widget.reveal_previous_change()
+}
+
+///|
+/// Reveal the previous change only when it remains inside this comparison.
+pub fn DiffEditor::reveal_previous_change_without_wrap(
+  self : DiffEditor,
+) -> Bool {
+  self.widget.reveal_previous_change_without_wrap()
 }
 
 ///|

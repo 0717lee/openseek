@@ -151,9 +151,11 @@ features. Its `MarkdownResourceKind` is explicit and is never inferred inside
 the widget.
 
 `DiffEditor` owns the model pair, provider/options, layout, focus, current diff
-state, update event, and next/previous change navigation. It is readonly; moves,
-hide-unchanged, revert, editing, and the full accessible diff viewer are outside
-the current scope.
+state, update event, paired content-height event, and next/previous change
+navigation. The height event is published only after both panes' alignment
+zones commit, so a stacked host never consumes a one-pane intermediate height.
+It is readonly; moves, hide-unchanged, revert, editing, and the full accessible
+diff viewer are outside the current scope.
 
 ## Package and architecture boundaries
 

@@ -1552,6 +1552,7 @@ pub fn subscriptions(
 ) -> @sub.Sub {
   @sub.batch([
     changes_poll_subscription(state, ctx, dispatch),
+    semantic_review_navigation_subscription(state, ctx, dispatch),
     state.search.subscription(
       ctx.search_input(),
       dispatch.map(msg => Search(msg)),
@@ -1900,6 +1901,7 @@ pub fn sync(
         review_diff_layout: state.review_diff_layout,
         review_diff_mode: state.review_diff_mode,
         review_diff_ignore_comments: state.review_diff_ignore_comments,
+        review_diff_ignore_tests: state.review_diff_ignore_tests,
         changes_collapsed: state.changes_collapsed,
         git_graph_collapsed: state.git_graph_collapsed,
         // Request tokens must outlive the per-conversation cache. Resetting
@@ -2126,8 +2128,15 @@ pub fn sync(
   } else {
     (@cmd.none, state)
   }
+  let state = state.sync_semantic_review(ctx)
   let pending_cmd = @cmd.batch([
-    retire_index_cmd, reroot_cmd, restore_cmd, changes_cmd, graph_cmd, history_cmd,
+    retire_index_cmd,
+    reroot_cmd,
+    restore_cmd,
+    changes_cmd,
+    graph_cmd,
+    history_cmd,
+    sync_semantic_review_editors(state),
   ])
   // A closed panel re-roots (above) and keeps the watcher placed, but the tree
   // itself can wait for the reopen. Unresolved placement takes the same early
@@ -2277,15 +2286,7 @@ pub fn update(
     }
     ReviewDiffModeSelected(mode) => {
       guard moon_diff_available(state, ctx) else { return (@cmd.none, state) }
-      let provider = apply_review_diff_provider(
-        mode,
-        state.review_diff_ignore_comments,
-      )
-      let selected = {
-        ..state,
-        review_diff_mode: mode,
-        review_diff_status: None,
-      }
+      let selected = { ..state, review_diff_mode: mode, }
       if ctx.active_file is Some(path) &&
         state.docs.get(path)
         is Some({ review: Some({ view_mode: ReviewSource, .. }), .. }) {
@@ -2295,9 +2296,9 @@ pub fn update(
           ctx,
           ReviewDiff,
         )
-        (@cmd.batch([provider, show]), diff)
+        (@cmd.batch([show, request_viewer_remeasure()]), diff)
       } else {
-        (provider, selected)
+        (request_viewer_remeasure(), selected)
       }
     }
     ToggleReviewDiffIgnoreComments => {
@@ -2306,37 +2307,83 @@ pub fn update(
         return (@cmd.none, state)
       }
       let ignore_comments = !state.review_diff_ignore_comments
-      (
-        apply_review_diff_provider(state.review_diff_mode, ignore_comments),
-        {
-          ..state,
-          review_diff_ignore_comments: ignore_comments,
-          review_diff_status: None,
-        },
-      )
+      (@cmd.none, { ..state, review_diff_ignore_comments: ignore_comments, })
     }
-    ReviewDiffStatusChanged(status) =>
-      if moon_diff_ready(state, ctx) &&
-        status.requested == state.review_diff_mode {
-        (@cmd.none, { ..state, review_diff_status: Some(status), })
-      } else {
-        (@cmd.none, state)
+    ToggleReviewDiffIgnoreTests => {
+      guard moon_diff_ready(state, ctx) &&
+        state.review_diff_mode != ReviewDiffCore else {
+        return (@cmd.none, state)
       }
+      let ignore_tests = !state.review_diff_ignore_tests
+      (@cmd.none, { ..state, review_diff_ignore_tests: ignore_tests, })
+    }
+    SemanticReviewSectionToggled(key) => {
+      guard semantic_sections(state.semantic_review_plan).any(section => {
+        section.key == key
+      }) else {
+        return (@cmd.none, state)
+      }
+      let semantic_review_collapsed = if state.semantic_review_collapsed.contains(
+          key,
+        ) {
+        state.semantic_review_collapsed.filter(item => item != key)
+      } else {
+        let collapsed = state.semantic_review_collapsed.copy()
+        collapsed.push(key)
+        collapsed
+      }
+      (@cmd.none, { ..state, semantic_review_collapsed, })
+    }
     ReviewDiffNavigationAvailabilityChanged(available) =>
       (@cmd.none, { ..state, review_diff_navigation_available: available, })
     RevealPreviousReviewDiffChange => {
-      guard full_diff_ready(state, ctx) &&
-        state.review_diff_navigation_available else {
+      guard review_diff_navigation_enabled(state, ctx) else {
         return (@cmd.none, state)
       }
-      (reveal_previous_review_diff_change(), state)
+      if core_diff_ready(state, ctx) {
+        (reveal_previous_review_diff_change(), state)
+      } else {
+        (
+          navigate_semantic_review_change(
+            dispatch,
+            state.semantic_review_collapsed,
+            SemanticReviewPrevious,
+          ),
+          state,
+        )
+      }
     }
     RevealNextReviewDiffChange => {
-      guard full_diff_ready(state, ctx) &&
-        state.review_diff_navigation_available else {
+      guard review_diff_navigation_enabled(state, ctx) else {
         return (@cmd.none, state)
       }
-      (reveal_next_review_diff_change(), state)
+      if core_diff_ready(state, ctx) {
+        (reveal_next_review_diff_change(), state)
+      } else {
+        (
+          navigate_semantic_review_change(
+            dispatch,
+            state.semantic_review_collapsed,
+            SemanticReviewNext,
+          ),
+          state,
+        )
+      }
+    }
+    RevealSemanticReviewSectionChange(key, reveal_last) => {
+      guard !core_diff_ready(state, ctx) &&
+        semantic_sections(state.semantic_review_plan).any(section => {
+          section.key == key
+        }) else {
+        return (@cmd.none, state)
+      }
+      let semantic_review_collapsed = state.semantic_review_collapsed.filter(collapsed => {
+        collapsed != key
+      })
+      (
+        reveal_semantic_review_section_change(key, reveal_last),
+        { ..state, semantic_review_collapsed, },
+      )
     }
     ToggleReviewProgress => {
       guard ctx.active_file is Some(path) &&

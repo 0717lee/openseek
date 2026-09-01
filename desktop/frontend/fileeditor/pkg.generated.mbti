@@ -7,6 +7,7 @@ import {
   "moonbit-community/rabbita/sub",
   "moonbitlang/core/debug",
   "moonbitlang/editor/base/common",
+  "moonbitlang/editor/viewer/diff_provider/moondiff",
   "openseek_desktop/frontend/dock",
   "openseek_desktop/frontend/grep_search",
   "openseek_desktop/frontend/interop",
@@ -27,7 +28,7 @@ pub fn apply_theme(String) -> @cmd.Cmd
 
 pub fn basename(@pathx.Relative) -> String
 
-pub fn body_view(@cmd.Emit[Msg], State, Ctx) -> @html.Html
+pub fn body_view(@cmd.Emit[Msg], State, Ctx, semantic_review? : @html.Html) -> @html.Html
 
 pub fn breadcrumb_view(@cmd.Emit[Msg], State, Ctx) -> @html.Html
 
@@ -54,6 +55,8 @@ pub fn remove_editor_feedback(ModelUri, String) -> @cmd.Cmd
 pub fn request_viewer_remeasure() -> @cmd.Cmd
 
 pub fn resize_handle_view() -> @html.Html
+
+pub fn semantic_review_view(@cmd.Emit[Msg], State) -> @html.Html
 
 pub fn subscriptions(State, Ctx, @cmd.Emit[Msg]) -> @sub.Sub
 
@@ -247,7 +250,8 @@ pub(all) enum Msg {
   ToggleReviewDiffLayout
   ReviewDiffModeSelected(ReviewDiffMode)
   ToggleReviewDiffIgnoreComments
-  ReviewDiffStatusChanged(ReviewDiffStatus)
+  ToggleReviewDiffIgnoreTests
+  SemanticReviewSectionToggled(String)
   ReviewDiffNavigationAvailabilityChanged(Bool)
   RevealPreviousReviewDiffChange
   RevealNextReviewDiffChange
@@ -267,6 +271,7 @@ pub(all) enum Msg {
   DiagnosticsPublished(channel~ : @interop.ChannelId, absolute~ : @common.Uri, diagnostics~ : Array[@protocol.LspDiagnostic])
   LanguageRequestFailed(owner~ : @interop.ConversationKey, message~ : String)
   EditorCommentAdded(resource~ : ModelUri, file~ : @pathx.Relative, range~ : @common.Range, quote~ : String, comment~ : String, feedback_id~ : String)
+  ApplyAllFeedback
   DiffCommentAdded(file~ : @pathx.Relative, original_line_number~ : Int?, modified_line_number~ : Int?, quote~ : String, comment~ : String, resource~ : ModelUri?, feedback_id~ : String?)
 }
 
@@ -305,12 +310,6 @@ pub(all) enum ReviewDiffMode {
   ReviewDiffTree
 } derive(Eq, @debug.Debug)
 
-pub(all) struct ReviewDiffStatus {
-  requested : ReviewDiffMode
-  effective : ReviewDiffMode
-  fell_back : Bool
-} derive(Eq, @debug.Debug)
-
 pub(all) struct ReviewState {
   generation : Int
   working_generation : Int
@@ -328,6 +327,25 @@ pub(all) enum ReviewViewMode {
 pub fn ReviewViewMode::equal(Self, Self) -> Bool
 pub fn ReviewViewMode::not_equal(Self, Self) -> Bool
 
+pub(all) struct SemanticReviewInput {
+  old_name : String
+  new_name : String
+  old_source : String
+  new_source : String
+  mode : @moondiff.MoonDiffMode
+  ignore_comments : Bool
+  ignore_tests : Bool
+  live_modified : SemanticReviewLiveDocument?
+} derive(Eq, @debug.Debug)
+pub fn SemanticReviewInput::equal(Self, Self) -> Bool
+pub fn SemanticReviewInput::not_equal(Self, Self) -> Bool
+pub fn SemanticReviewInput::to_repr(Self) -> @debug.Repr
+
+pub(all) struct SemanticReviewLiveDocument {
+  resource : @common.Uri
+  path : @pathx.Relative
+} derive(Eq, @debug.Debug)
+
 pub(all) struct State {
   owner : @interop.ConversationKey?
   placement : ReconciledPlacement
@@ -338,7 +356,10 @@ pub(all) struct State {
   review_diff_layout : ReviewDiffLayout
   review_diff_mode : ReviewDiffMode
   review_diff_ignore_comments : Bool
-  review_diff_status : ReviewDiffStatus?
+  review_diff_ignore_tests : Bool
+  semantic_review_input : SemanticReviewInput?
+  semantic_review_plan : @moondiff.SectionedSemanticReviewPlan?
+  semantic_review_collapsed : Array[String]
   review_diff_navigation_available : Bool
   changes : ChangeList
   git_graph : GitGraphState

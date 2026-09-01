@@ -241,6 +241,12 @@ test "historical tabs use only the inert diff surface and history controls" {
     ),
   )
   inspect(
+    render_review_control(review_tests_control(test_emit(), state, ctx)),
+    content=(
+      #|<button aria-label="Ignore tests" aria-pressed="false" title="Available in Token and Tree diff" type="button" class="review-tests-control" disabled>Tests: ignored</button>
+    ),
+  )
+  inspect(
     render_review_control(review_diff_navigation(test_emit(), state, ctx)),
     content=(
       #|<div role="group" aria-label="Diff change navigation" class="review-diff-navigation">
@@ -278,37 +284,6 @@ test "historical tabs use only the inert diff surface and history controls" {
       #|</span>
       #|</button>
       #|</div>
-    ),
-  )
-
-  let text_diff = { ..diff, path: @pathx.Relative("README.md"), }
-  let text_history_docs : Map[String, HistoryDiffDoc] = Map([])
-  text_history_docs[history_diff_key(text_diff)] = {
-    diff: text_diff,
-    generation: 1,
-    original: HistoryBlobContent("old"),
-    modified: HistoryBlobContent("new"),
-  }
-  let text_state = {
-    ..state,
-    history_docs: text_history_docs,
-    review_diff_mode: ReviewDiffTree,
-    review_diff_status: Some({
-      requested: ReviewDiffTree,
-      effective: ReviewDiffToken,
-      fell_back: true,
-    }),
-  }
-  let text_ctx = {
-    ..ctx,
-    open_history_diffs: [text_diff],
-    active_history_diff: Some(text_diff),
-  }
-  inspect(
-    render_review_control(review_diff_status(text_state, text_ctx)),
-    content=(
-      #|<span role="status" aria-live="polite" class="review-diff-mode-status hidden">
-      #|</span>
     ),
   )
 }

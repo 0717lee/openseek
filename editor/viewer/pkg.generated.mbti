@@ -34,17 +34,24 @@ type DiffEditor
 pub fn DiffEditor::create(@dom.Element, services? : ViewerServices, options? : DiffEditorOptions, provider? : &@diff.DocumentDiffProvider) -> Self
 pub fn DiffEditor::dispose(Self) -> Unit
 pub fn DiffEditor::focus(Self) -> Unit
+pub fn DiffEditor::get_content_height(Self) -> Double
 pub fn DiffEditor::get_diff(Self) -> @diff.DocumentDiff?
 pub fn DiffEditor::get_layout(Self) -> DiffEditorLayout
+pub fn DiffEditor::get_max_scroll_left(Self) -> Double
 pub fn DiffEditor::get_model(Self) -> DiffEditorModel?
 pub fn DiffEditor::is_diff_up_to_date(Self) -> Bool
 pub fn DiffEditor::layout(Self) -> Unit
+pub fn DiffEditor::on_did_change_content_height(Self, (Double) -> Unit) -> @common.Disposable
 pub fn DiffEditor::on_did_update_diff(Self, () -> Unit) -> @common.Disposable
 pub fn DiffEditor::reveal_first_diff(Self) -> Unit
+pub fn DiffEditor::reveal_last_diff(Self) -> Unit
 pub fn DiffEditor::reveal_next_change(Self) -> Bool
+pub fn DiffEditor::reveal_next_change_without_wrap(Self) -> Bool
 pub fn DiffEditor::reveal_previous_change(Self) -> Bool
+pub fn DiffEditor::reveal_previous_change_without_wrap(Self) -> Bool
 pub fn DiffEditor::set_diff_provider(Self, &@diff.DocumentDiffProvider) -> Unit
 pub fn DiffEditor::set_model(Self, DiffEditorModel?) -> DiffEditorModel?
+pub fn DiffEditor::set_scroll_left(Self, Double) -> Unit
 pub fn DiffEditor::update_options(Self, DiffEditorOptions) -> Unit
 
 pub(all) enum DiffEditorLayout {
@@ -62,7 +69,7 @@ pub(all) struct DiffEditorModel {
 pub fn DiffEditorModel::DiffEditorModel(@model.TextModel, @model.TextModel) -> Self
 
 type DiffEditorOptions
-pub fn DiffEditorOptions::DiffEditorOptions(editor_options? : ViewerOptions, layout? : DiffEditorLayout, automatic_inline? : Bool, automatic_inline_width? : Double, sash_enabled? : Bool, split_ratio? : Double, diff_word_wrap? : DiffWordWrap, overview_ruler? : Bool, render_indicators? : Bool, ignore_trim_whitespace? : Bool) -> Self
+pub fn DiffEditorOptions::DiffEditorOptions(editor_options? : ViewerOptions, layout? : DiffEditorLayout, automatic_inline? : Bool, automatic_inline_width? : Double, sash_enabled? : Bool, split_ratio? : Double, diff_word_wrap? : DiffWordWrap, overview_ruler? : Bool, render_indicators? : Bool, render_markdown_comments? : Bool, handle_mouse_wheel? : Bool, ignore_trim_whitespace? : Bool) -> Self
 pub fn DiffEditorOptions::default() -> Self
 pub fn DiffEditorOptions::layout(Self) -> DiffEditorLayout
 pub fn DiffEditorOptions::with_editor_options(Self, ViewerOptions) -> Self

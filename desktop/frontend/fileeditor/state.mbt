@@ -84,33 +84,22 @@ pub(all) enum ReviewViewMode {
 } derive(Eq)
 
 ///|
-/// The layout of the full textual comparison. This panel-level preference is
-/// independent from `ReviewViewMode`: returning to source keeps the chosen
-/// layout for the next full-diff open and for the next changed file.
+/// The layout shared by Core and sectioned semantic comparison. This
+/// panel-level preference is independent from `ReviewViewMode`: returning to
+/// source keeps it for the next review and the next changed file.
 pub(all) enum ReviewDiffLayout {
   ReviewSideBySide
   ReviewInline
 } derive(Eq)
 
 ///|
-/// Desktop-owned comparison algorithm preference. Non-MoonBit comparisons
-/// force Core at the provider boundary without overwriting this preference,
-/// so returning to a `.mbt` review restores Token or Tree.
+/// Desktop-owned comparison algorithm preference. Core keeps the complete
+/// file DiffEditor; Token and Tree select the sectioned semantic review.
+/// Non-MoonBit comparisons keep using Core without overwriting this preference.
 pub(all) enum ReviewDiffMode {
   ReviewDiffCore
   ReviewDiffToken
   ReviewDiffTree
-} derive(Eq, Debug)
-
-///|
-/// The last provider result for the visible MoonBit comparison. A requested
-/// Tree calculation can legitimately settle as Token; malformed specialized
-/// output settles as Core. The host renders this fallback instead of placing
-/// product controls inside the reusable diff editor.
-pub(all) struct ReviewDiffStatus {
-  requested : ReviewDiffMode
-  effective : ReviewDiffMode
-  fell_back : Bool
 } derive(Eq, Debug)
 
 ///|
@@ -410,17 +399,25 @@ pub(all) struct State {
   // not force the reviewer to request the full diff again.
   review_view_mode : ReviewViewMode
   // Side-by-side/inline is likewise a reviewer preference rather than
-  // document state. The imperative DiffEditor retains both models while
-  // applying it.
+  // document state. Core applies it to its retained models; Token/Tree update
+  // the DiffEditor mounted inside every semantic section.
   review_diff_layout : ReviewDiffLayout
-  // The requested MoonBit-aware algorithm and comment policy are desktop
-  // preferences. The provider is forced to Core for other file types while
+  // The requested MoonBit-aware algorithm and filtering policy are desktop
+  // preferences. Other file types keep rendering the Core surface while
   // these values remain parked for the next `.mbt` comparison.
   review_diff_mode : ReviewDiffMode
   review_diff_ignore_comments : Bool
-  // Updated from DiffEditor's completed provider transaction. `None` means a
-  // new model/options calculation has not yet produced host-visible status.
-  review_diff_status : ReviewDiffStatus?
+  review_diff_ignore_tests : Bool
+  // Token/Tree comparisons are computed once during state reconciliation.
+  // The view renders only section chrome and stable editor hosts; the
+  // imperative lifecycle consumes the same plan to mount one DiffEditor per
+  // top-level fragment.
+  semantic_review_input : SemanticReviewInput?
+  semantic_review_plan : @moon_diff_provider.SectionedSemanticReviewPlan?
+  // VS Code's MultiDiffEditor keeps collapse state per document item. Our
+  // semantic input is one tab-local document, so reset these section keys when
+  // that input changes while preserving them across layout/theme rerenders.
+  semantic_review_collapsed : Array[String]
   // Whether DiffEditor's current (possibly source-mode parked) comparison has
   // at least one completed change for cyclic previous/next navigation.
   review_diff_navigation_available : Bool
@@ -536,8 +533,13 @@ pub fn State::empty() -> State {
     review_view_mode: ReviewDiff,
     review_diff_layout: ReviewSideBySide,
     review_diff_mode: ReviewDiffCore,
+    // Token/Tree starts from semantic production changes. Both explicit
+    // toggles can restore comments/blank lines or test blocks when needed.
     review_diff_ignore_comments: true,
-    review_diff_status: None,
+    review_diff_ignore_tests: true,
+    semantic_review_input: None,
+    semantic_review_plan: None,
+    semantic_review_collapsed: [],
     review_diff_navigation_available: false,
     changes: ChangeListIdle,
     git_graph: GitGraphIdle,
@@ -605,6 +607,7 @@ pub fn State::prepare_owner(
     review_diff_layout: self.review_diff_layout,
     review_diff_mode: self.review_diff_mode,
     review_diff_ignore_comments: self.review_diff_ignore_comments,
+    review_diff_ignore_tests: self.review_diff_ignore_tests,
     changes_generation: self.changes_generation,
     request_epoch: self.request_epoch + 1,
     file_link_generation: self.file_link_generation,
@@ -827,24 +830,25 @@ pub(all) enum Msg {
   // presentation and the full comparison. Unavailable/loading reviews ignore
   // the action.
   ToggleReviewDiff
-  // Switch a visible full comparison between side-by-side panes and inline
-  // rows.
+  // Switch a visible comparison between side-by-side panes and inline rows.
   // Source mode and unavailable/loading comparisons ignore the action.
   ToggleReviewDiffLayout
-  // Select the desktop-owned comparison provider mode. Token and Tree are
-  // accepted only for a visible `.mbt` comparison; other files keep the
-  // preference parked while their provider is forced to Core.
+  // Select the desktop-owned comparison mode. Token and Tree are accepted
+  // only for a visible `.mbt` comparison; other files keep the preference
+  // parked while rendering Core.
   ReviewDiffModeSelected(ReviewDiffMode)
   ToggleReviewDiffIgnoreComments
-  // Provider completion is asynchronous with respect to the Rabbita update
-  // loop. This message republishes the requested/effective mode so the host
-  // toolbar can announce Tree→Token and specialized→Core fallbacks.
-  ReviewDiffStatusChanged(ReviewDiffStatus)
+  ToggleReviewDiffIgnoreTests
+  // Toggle one top-level entry in the Token/Tree multi-diff container.
+  SemanticReviewSectionToggled(String)
   // DiffEditor's provider transaction also controls whether its existing
   // cyclic change-navigation commands have a target.
   ReviewDiffNavigationAvailabilityChanged(Bool)
   RevealPreviousReviewDiffChange
   RevealNextReviewDiffChange
+  // Continue multi-diff navigation in another Token/Tree section. `true`
+  // reveals the final change when moving backward; `false` reveals the first.
+  RevealSemanticReviewSectionChange(String, Bool)
   // Mark the active changed-file review as reviewed, or return it to the
   // unreviewed queue. Ordinary file tabs ignore the action.
   ToggleReviewProgress

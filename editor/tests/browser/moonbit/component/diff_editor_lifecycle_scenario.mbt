@@ -265,6 +265,7 @@ fn run_diff_editor_lifecycle_test() -> Unit {
       |> ignore
     },
     () => widget.reveal_first_diff(),
+    () => widget.reveal_last_diff(),
     () => widget.dispose(),
     () => {
       original.dispose()
@@ -292,10 +293,11 @@ extern "js" fn install_diff_editor_lifecycle_controls(
   set_provider : (String) -> Unit,
   set_model_attached : (Bool) -> Unit,
   reveal_first_diff : () -> Unit,
+  reveal_last_diff : () -> Unit,
   dispose : () -> Unit,
   dispose_models : () -> Unit,
 ) -> Unit =
-  #| (snapshot, setFixture, setDigitLineCount, setOptions, setProvider, setModelAttached, revealFirstDiff, dispose, disposeModels) => {
+  #| (snapshot, setFixture, setDigitLineCount, setOptions, setProvider, setModelAttached, revealFirstDiff, revealLastDiff, dispose, disposeModels) => {
   #|   globalThis.__diffEditorLifecycleControls = Object.freeze({
   #|     snapshot() { return JSON.parse(snapshot()); },
   #|     set_fixture: setFixture,
@@ -304,6 +306,7 @@ extern "js" fn install_diff_editor_lifecycle_controls(
   #|     set_provider: setProvider,
   #|     set_model_attached: setModelAttached,
   #|     reveal_first_diff: revealFirstDiff,
+  #|     reveal_last_diff: revealLastDiff,
   #|     dispose,
   #|     dispose_models: disposeModels,
   #|   });

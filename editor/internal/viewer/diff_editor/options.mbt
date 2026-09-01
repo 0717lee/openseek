@@ -27,6 +27,8 @@ pub(all) struct DiffEditorOptions {
   diff_word_wrap : DiffWordWrap
   overview_ruler : Bool
   render_indicators : Bool
+  render_markdown_comments : Bool
+  handle_mouse_wheel : Bool
   ignore_trim_whitespace : Bool
 }
 
@@ -40,6 +42,8 @@ pub fn DiffEditorOptions::DiffEditorOptions(
   diff_word_wrap? : DiffWordWrap = Inherit,
   overview_ruler? : Bool = true,
   render_indicators? : Bool = true,
+  render_markdown_comments? : Bool = true,
+  handle_mouse_wheel? : Bool = true,
   ignore_trim_whitespace? : Bool = true,
 ) -> DiffEditorOptions {
   {
@@ -51,6 +55,8 @@ pub fn DiffEditorOptions::DiffEditorOptions(
     diff_word_wrap,
     overview_ruler,
     render_indicators,
+    render_markdown_comments,
+    handle_mouse_wheel,
     ignore_trim_whitespace,
   }
 }

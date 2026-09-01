@@ -165,6 +165,25 @@ fn DiffState::next_change_from_modified_line(
 }
 
 ///|
+/// Resolve the next navigation group without wrapping to the first group.
+/// Multi-diff hosts use this to decide whether F7 stays in the active item or
+/// advances to the next comparison.
+fn DiffState::next_change_from_modified_line_without_wrap(
+  self : DiffState,
+  current_line_number : Int,
+) -> DiffNavigationTarget? {
+  let changes = self.navigation_changes()
+  let count = changes.length()
+  let mut index = 0
+  while index < count &&
+        changes[index].modified.start_line_number <= current_line_number {
+    index += 1
+  }
+  guard index < count else { return None }
+  Some({ change_index: index, change_count: count, change: changes[index], })
+}
+
+///|
 fn DiffState::previous_change_from_modified_line(
   self : DiffState,
   current_line_number : Int,
@@ -182,5 +201,22 @@ fn DiffState::previous_change_from_modified_line(
   if index < 0 {
     index = count - 1
   }
+  Some({ change_index: index, change_count: count, change: changes[index], })
+}
+
+///|
+/// Resolve the previous navigation group without wrapping to the final group.
+fn DiffState::previous_change_from_modified_line_without_wrap(
+  self : DiffState,
+  current_line_number : Int,
+) -> DiffNavigationTarget? {
+  let changes = self.navigation_changes()
+  let count = changes.length()
+  let mut index = count - 1
+  while index >= 0 &&
+        changes[index].modified.start_line_number >= current_line_number {
+    index -= 1
+  }
+  guard index >= 0 else { return None }
   Some({ change_index: index, change_count: count, change: changes[index], })
 }

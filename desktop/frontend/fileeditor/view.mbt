@@ -297,7 +297,8 @@ pub fn resize_handle_view() -> @html.Html {
 /// viewer with its notice overlay, and the workspace tree (expandable and
 /// always rooted at the workspace root) as a toggleable pane on
 /// the viewer's right. Always rendered so the viewer's host element
-/// (`viewer-host`, `markdown-viewer-host`, and `diff-editor-host`) stay put
+/// (`viewer-host`, `markdown-viewer-host`, `diff-editor-host`, and
+/// `semantic-review-host`) stay put
 /// across renders and screen
 /// switches; CSS hides the inactive surface and the tree pane when toggled off,
 /// and collapses the whole panel to zero width when it is closed. The children's
@@ -307,10 +308,11 @@ pub fn body_view(
   dispatch : @cmd.Emit[Msg],
   state : State,
   ctx : Ctx,
+  semantic_review? : @html.Html = @html.nothing,
 ) -> @html.Html {
-  // The stable elements the code Viewer, MarkdownViewer, and switchable
-  // DiffEditor attach their imperative DOM into; they stay empty and are
-  // never re-keyed
+  // The stable elements the code Viewer, MarkdownViewer, and switchable Core
+  // DiffEditor attach their imperative DOM into. Semantic review owns keyed
+  // empty child hosts under its stable sibling.
   // (see editor_panel.mbt).
   // `editor-shell` brings in the viewer's `--vscode-*` / `--editor-*` theme
   // variables (defined on that class in the bundled viewer.css); `data-theme`
@@ -336,6 +338,13 @@ pub fn body_view(
           state.docs.get(path).map(doc => doc.name).unwrap_or(path.0),
         )
       None => false
+    })
+  let use_semantic_surface = use_diff_surface &&
+    state.review_diff_mode != ReviewDiffCore &&
+    (match ctx.active_history_diff {
+      Some(diff) => supports_moon_diff(diff.path.0)
+      None =>
+        ctx.active_file.map(path => supports_moon_diff(path.0)).unwrap_or(false)
     })
   let viewer_host = @html.div(
     attrs=@html.Attrs::build()
@@ -367,7 +376,7 @@ pub fn body_view(
     attrs=@html.Attrs::build()
       .id(DiffEditorHostId)
       .class(
-        if use_diff_surface {
+        if use_diff_surface && !use_semantic_surface {
           "viewer-host editor-shell"
         } else {
           "viewer-host editor-shell moonbit-viewer-surface-hidden"
@@ -376,11 +385,32 @@ pub fn body_view(
       .data_set("theme", if ctx.dark_mode { "dark" } else { "light" }),
     ([] : Array[@html.Html]),
   )
+  let semantic_review_host = @html.div(
+    attrs=@html.Attrs::build()
+      .id(SemanticReviewHostId)
+      .class(
+        if use_semantic_surface {
+          "viewer-host editor-shell semantic-review-host"
+        } else {
+          "viewer-host editor-shell semantic-review-host moonbit-viewer-surface-hidden"
+        },
+      )
+      .data_set("theme", if ctx.dark_mode { "dark" } else { "light" })
+      .on_scroll(event => {
+        guard event.target().to_element() is Some(element) else {
+          return @cmd.none
+        }
+        sync_semantic_review_scroll_left(element.get_scroll_left())
+        @cmd.none
+      }),
+    semantic_review,
+  )
   @html.div(class="editor-body", [
     @html.div(class="viewer-stack", [
       viewer_host,
       markdown_viewer_host,
       diff_editor_host,
+      semantic_review_host,
       viewer_notice(state, ctx),
     ]),
     tree_pane(dispatch, state, ctx),
@@ -1729,7 +1759,7 @@ pub fn breadcrumb_view(
           ),
           review_diff_layout_toggle(dispatch, state, ctx),
           review_comments_control(dispatch, state, ctx),
-          review_diff_status(state, ctx),
+          review_tests_control(dispatch, state, ctx),
           review_diff_navigation(dispatch, state, ctx),
         ]),
       ],
@@ -1796,7 +1826,7 @@ pub fn breadcrumb_view(
         ),
         review_diff_layout_toggle(dispatch, state, ctx),
         review_comments_control(dispatch, state, ctx),
-        review_diff_status(state, ctx),
+        review_tests_control(dispatch, state, ctx),
         review_diff_navigation(dispatch, state, ctx),
       ]),
     ]
@@ -1863,6 +1893,28 @@ fn moon_diff_available(state : State, ctx : Ctx) -> Bool {
 ///|
 fn moon_diff_ready(state : State, ctx : Ctx) -> Bool {
   moon_diff_available(state, ctx) && full_diff_ready(state, ctx)
+}
+
+///|
+/// Whether the visible comparison is the complete Core DiffEditor. A parked
+/// Token/Tree preference does not affect non-MoonBit files, which always keep
+/// the Core surface.
+fn core_diff_ready(state : State, ctx : Ctx) -> Bool {
+  full_diff_ready(state, ctx) &&
+  (state.review_diff_mode == ReviewDiffCore || !moon_diff_ready(state, ctx))
+}
+
+///|
+/// Core receives availability from its mounted provider. Token/Tree plans are
+/// already nonempty change documents, so their aggregate navigation is ready
+/// once at least one semantic item exists.
+fn review_diff_navigation_enabled(state : State, ctx : Ctx) -> Bool {
+  if core_diff_ready(state, ctx) {
+    state.review_diff_navigation_available
+  } else {
+    full_diff_ready(state, ctx) &&
+    !semantic_sections(state.semantic_review_plan).is_empty()
+  }
 }
 
 ///|
@@ -2013,39 +2065,6 @@ fn review_diff_mode_toolbar(
 }
 
 ///|
-fn review_diff_fallback_text(state : State) -> String {
-  guard state.review_diff_status is Some(status) &&
-    status.requested == state.review_diff_mode &&
-    status.fell_back else {
-    return ""
-  }
-  status.requested.label() +
-  " unavailable — showing " +
-  status.effective.label() +
-  " diff"
-}
-
-///|
-fn review_diff_status(state : State, ctx : Ctx) -> @html.Html {
-  // Provider status may outlive the comparison that produced it. Only a
-  // Moon-aware active diff can interpret that retained status.
-  let fallback = if moon_diff_ready(state, ctx) {
-    review_diff_fallback_text(state)
-  } else {
-    ""
-  }
-  @html.span(
-    class=if fallback.is_empty() {
-      "review-diff-mode-status hidden"
-    } else {
-      "review-diff-mode-status"
-    },
-    attrs=@html.Attrs::build().role("status").aria_live("polite"),
-    fallback,
-  )
-}
-
-///|
 fn review_comments_control(
   dispatch : @cmd.Emit[Msg],
   state : State,
@@ -2086,6 +2105,46 @@ fn review_comments_control(
 }
 
 ///|
+fn review_tests_control(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> @html.Html {
+  guard moon_diff_available(state, ctx) else {
+    return @html.span(class="review-tests-control hidden", "")
+  }
+  let enabled = full_diff_ready(state, ctx) &&
+    state.review_diff_mode != ReviewDiffCore
+  @html.button(
+    type_="button",
+    class=if enabled && state.review_diff_ignore_tests {
+      "review-tests-control active"
+    } else {
+      "review-tests-control"
+    },
+    title=if !full_diff_ready(state, ctx) {
+      "Available in diff view"
+    } else if state.review_diff_mode == ReviewDiffCore {
+      "Available in Token and Tree diff"
+    } else if state.review_diff_ignore_tests {
+      "Include tests in the comparison"
+    } else {
+      "Ignore MoonBit test blocks"
+    },
+    disabled=!enabled,
+    on_click=dispatch(ToggleReviewDiffIgnoreTests),
+    attrs=@html.Attrs::build()
+      .aria_label("Ignore tests")
+      .aria_pressed((enabled && state.review_diff_ignore_tests).to_string()),
+    if state.review_diff_ignore_tests {
+      "Tests: ignored"
+    } else {
+      "Tests: included"
+    },
+  )
+}
+
+///|
 /// Previous/next controls for walking the DiffEditor's computed change groups.
 /// They share the same command path as Shift+F7/F7, including wrapping at the
 /// ends; the buttons therefore stay enabled at the first and last change.
@@ -2098,7 +2157,7 @@ fn review_diff_navigation(
     return @html.span(class="review-diff-navigation hidden", "")
   }
   let enabled = full_diff_ready(state, ctx) &&
-    state.review_diff_navigation_available
+    review_diff_navigation_enabled(state, ctx)
   @html.div(
     class="review-diff-navigation",
     attrs=@html.Attrs::build()
@@ -2134,9 +2193,9 @@ fn review_diff_navigation(
 }
 
 ///|
-/// The full comparison keeps its two models mounted while this explicit pair
-/// changes only their layout. File mode preserves the preference but disables
-/// both choices so it cannot imply that a source file is split or unified.
+/// Core keeps its two models mounted while Token/Tree reuse one section plan;
+/// this explicit pair changes either presentation. File mode preserves the
+/// preference but disables both choices until the next review reveal.
 fn review_diff_layout_toggle(
   dispatch : @cmd.Emit[Msg],
   state : State,
