@@ -69,6 +69,18 @@ async function expectOriginalLineNumbers(original, expected) {
   )).toEqual(expect.arrayContaining(expected));
 }
 
+async function contentHeightState(page) {
+  return page.evaluate(() => {
+    const controls = globalThis.__diffMarkdownCommentsControls;
+    const host = document.querySelector('.diff-markdown-comments-host');
+    return {
+      eventCount: controls.content_height_event_count(),
+      contentHeight: controls.content_height(),
+      hostHeight: host.getBoundingClientRect().height,
+    };
+  });
+}
+
 test('keeps rich comments in both split panes and only the modified inline pane', async ({ page }) => {
   const root = await openFixture(page);
   const original = root.locator('.moonbit-diff-editor-original');
@@ -189,4 +201,73 @@ test('balances a final-line change inside a compact multi-line comment', async (
   await expect(modified.locator(commentSelector)).toHaveCount(1);
   await expect(modifiedCompensation).toHaveCount(1);
   await expectTailAlignment(root);
+});
+
+test('publishes one final paired height for a Markdown comment fold change', async ({ page }) => {
+  const root = await openFixture(page);
+  const original = root.locator('.moonbit-diff-editor-original');
+  const modified = root.locator('.moonbit-diff-editor-modified');
+
+  await control(page, 'set_layout', 'split');
+  await expect(original.locator(commentSelector)).toHaveCount(1);
+  await expect(modified.locator(commentSelector)).toHaveCount(1);
+  await waitForFrames(page, 6);
+  await page.evaluate(() => {
+    globalThis.__diffMarkdownCommentsControls.enable_auto_height();
+  });
+  await waitForFrames(page, 4);
+
+  const folded = await contentHeightState(page);
+  expect(Math.abs(
+    folded.hostHeight - Math.max(40, Math.ceil(folded.contentHeight) + 2),
+  )).toBeLessThanOrEqual(1);
+
+  await modified.locator(
+    '.moonbit-viewer-markdown-comment-toggle[aria-label="Expand API documentation"]',
+  ).click();
+  await expect.poll(async () =>
+    (await contentHeightState(page)).eventCount,
+  ).toBe(folded.eventCount + 1);
+
+  const expanded = await contentHeightState(page);
+  expect(expanded.hostHeight).toBeGreaterThan(folded.hostHeight);
+  expect(Math.abs(
+    expanded.hostHeight - Math.max(40, Math.ceil(expanded.contentHeight) + 2),
+  )).toBeLessThanOrEqual(1);
+  await expect.poll(() => modified.locator(commentSelector).evaluate((node) => {
+    const content = node.querySelector(
+      '.moonbit-viewer-markdown-comment-content',
+    );
+    return Math.abs(
+      node.getBoundingClientRect().height - content.offsetHeight,
+    );
+  })).toBeLessThanOrEqual(1);
+  await expectTailAlignment(root);
+
+  await waitForFrames(page, 6);
+  const stableExpanded = await contentHeightState(page);
+  expect(stableExpanded.eventCount).toBe(expanded.eventCount);
+  expect(Math.abs(stableExpanded.hostHeight - expanded.hostHeight))
+    .toBeLessThanOrEqual(1);
+
+  await modified.locator(
+    '.moonbit-viewer-markdown-comment-toggle[aria-label="Collapse API documentation"]',
+  ).click();
+  await expect.poll(async () =>
+    (await contentHeightState(page)).eventCount,
+  ).toBe(expanded.eventCount + 1);
+  const collapsed = await contentHeightState(page);
+  expect(collapsed.hostHeight).toBeLessThan(expanded.hostHeight);
+  expect(Math.abs(
+    collapsed.hostHeight - Math.max(40, Math.ceil(collapsed.contentHeight) + 2),
+  )).toBeLessThanOrEqual(1);
+  expect(Math.abs(collapsed.hostHeight - folded.hostHeight))
+    .toBeLessThanOrEqual(1);
+  await expectTailAlignment(root);
+
+  await waitForFrames(page, 6);
+  const stableCollapsed = await contentHeightState(page);
+  expect(stableCollapsed.eventCount).toBe(collapsed.eventCount);
+  expect(Math.abs(stableCollapsed.hostHeight - collapsed.hostHeight))
+    .toBeLessThanOrEqual(1);
 });

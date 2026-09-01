@@ -2286,10 +2286,7 @@ pub fn update(
     }
     ReviewDiffModeSelected(mode) => {
       guard moon_diff_available(state, ctx) else { return (@cmd.none, state) }
-      let selected = {
-        ..state,
-        review_diff_mode: mode,
-      }
+      let selected = { ..state, review_diff_mode: mode, }
       if ctx.active_file is Some(path) &&
         state.docs.get(path)
         is Some({ review: Some({ view_mode: ReviewSource, .. }), .. }) {

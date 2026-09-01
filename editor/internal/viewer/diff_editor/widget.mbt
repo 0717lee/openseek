@@ -37,6 +37,12 @@ pub struct DiffEditorWidget {
   mut original_alignment_geometry : PaneGeometrySnapshot?
   mut modified_alignment_geometry : PaneGeometrySnapshot?
   mut diff_state : DiffState?
+  /// The section-host contract is published only after one complete geometry
+  /// reconcile has committed both panes' owned alignment zones. Retaining the
+  /// last value prevents a host height write followed by `layout()` from
+  /// feeding the same height back into the host.
+  did_change_content_height : @base_common.Emitter[Double]
+  mut last_published_content_height : Double?
   /// One VS Code-style `revealFirstDiff` request, bound to the model-pair
   /// generation that was current when the host made it. The request survives
   /// asynchronous diff computation and hidden/layout render barriers, but a
@@ -209,6 +215,8 @@ pub fn DiffEditorWidget::create(
     original_alignment_geometry: None,
     modified_alignment_geometry: None,
     diff_state: None,
+    did_change_content_height: Emitter(),
+    last_published_content_height: None,
     pending_reveal_first_diff_generation: None,
     pending_reveal_last_diff_generation: None,
     reconciling_generation: 0,
@@ -1215,11 +1223,13 @@ fn DiffEditorWidget::commit_diff_state(
 fn DiffEditorWidget::reconcile_geometry_if_changed(
   self : DiffEditorWidget,
 ) -> Unit {
-  if self.disposed ||
-    self.editors.is_committing_model_pair() ||
-    self.is_reconciling ||
-    self.diff_state is None ||
-    self.view_model.get_diff() is None {
+  // Always re-enter through the paired transaction. Besides committing both
+  // sides' derived alignment zones, `reconcile_view_model` owns the pane-render
+  // barrier, positive-layout, model-pair, and generation fences. Publishing
+  // directly from this child event would expose the exact one-pane
+  // intermediate state this event is designed to hide.
+  if self.diff_state is None || self.view_model.get_diff() is None {
+    self.reconcile_view_model()
     return
   }
   let (original, modified) = self.capture_alignment_geometry()
@@ -1229,10 +1239,35 @@ fn DiffEditorWidget::reconcile_geometry_if_changed(
     self.original_alignment_geometry,
     self.modified_alignment_geometry,
   )
-  if !geometry_changed {
+  let content_height = self.get_content_height()
+  let content_height_changed = content_height > 0.0 &&
+    self.last_published_content_height != Some(content_height)
+  if geometry_changed || content_height_changed {
+    // Even the content-height-only path must cross the complete reconciliation
+    // gate; it must never publish directly from one child editor.
+    self.reconcile_view_model()
+  }
+}
+
+///|
+/// Publish the final paired height, never an intermediate child-editor height.
+/// In particular, a Markdown-comment ViewZone first changes one pane, then the
+/// diff geometry transaction replaces alignment zones in both panes. This
+/// method runs only after that transaction and updates the retained value
+/// before firing so a synchronous host resize cannot re-enter with a duplicate.
+fn DiffEditorWidget::publish_content_height_if_changed(
+  self : DiffEditorWidget,
+) -> Unit {
+  if self.disposed {
     return
   }
-  self.reconcile_view_model()
+  let content_height = self.get_content_height()
+  if content_height <= 0.0 ||
+    self.last_published_content_height == Some(content_height) {
+    return
+  }
+  self.last_published_content_height = Some(content_height)
+  self.did_change_content_height.fire(content_height)
 }
 
 ///|
@@ -1261,6 +1296,10 @@ fn DiffEditorWidget::reconcile_view_model(self : DiffEditorWidget) -> Unit {
   self.is_reconciling = true
   defer {
     self.is_reconciling = false
+    // `commit_diff_state` has now replaced both sides' alignment zones. A
+    // section host can synchronously adopt this height without observing the
+    // one-pane Markdown/ViewZone intermediate state.
+    self.publish_content_height_if_changed()
   }
   self.reconciling_generation += 1
   let generation = self.reconciling_generation
@@ -1420,6 +1459,17 @@ pub fn DiffEditorWidget::get_content_height(self : DiffEditorWidget) -> Double {
   self.editors.original
   .get_content_height()
   .max(self.editors.modified.get_content_height())
+}
+
+///|
+/// Fires after a complete paired geometry transaction changes the final
+/// content height. The payload already includes Markdown/foreign ViewZones and
+/// both panes' committed alignment zones.
+pub fn DiffEditorWidget::on_did_change_content_height(
+  self : DiffEditorWidget,
+  listener : (Double) -> Unit,
+) -> @base_common.Disposable {
+  self.did_change_content_height.event(listener)
 }
 
 ///|
@@ -1905,6 +1955,7 @@ pub fn DiffEditorWidget::dispose(self : DiffEditorWidget) -> Unit {
   self.original_alignment_geometry = None
   self.modified_alignment_geometry = None
   self.diff_state = None
+  self.last_published_content_height = None
   self.pending_reveal_first_diff_generation = None
   self.pending_reveal_last_diff_generation = None
   self.reconciling_generation = 0
@@ -1913,5 +1964,6 @@ pub fn DiffEditorWidget::dispose(self : DiffEditorWidget) -> Unit {
   self.has_valid_layout_box = false
   self.inline_original_strip_width = -1.0
   self.clear_pending_scroll_echoes()
+  self.did_change_content_height.dispose()
   self.host.remove_child(self.root.as_node())
 }

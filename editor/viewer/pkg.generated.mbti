@@ -41,6 +41,7 @@ pub fn DiffEditor::get_max_scroll_left(Self) -> Double
 pub fn DiffEditor::get_model(Self) -> DiffEditorModel?
 pub fn DiffEditor::is_diff_up_to_date(Self) -> Bool
 pub fn DiffEditor::layout(Self) -> Unit
+pub fn DiffEditor::on_did_change_content_height(Self, (Double) -> Unit) -> @common.Disposable
 pub fn DiffEditor::on_did_update_diff(Self, () -> Unit) -> @common.Disposable
 pub fn DiffEditor::reveal_first_diff(Self) -> Unit
 pub fn DiffEditor::reveal_last_diff(Self) -> Unit

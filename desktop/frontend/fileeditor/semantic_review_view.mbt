@@ -463,7 +463,8 @@ priv struct SemanticReviewEditorHost {
   host : @dom.Element
   editor : @viewer.DiffEditor
   provider : @moon_diff_provider.MoonFragmentDiffProvider?
-  subscription : @common.Disposable
+  diff_subscription : @common.Disposable
+  content_height_subscription : @common.Disposable
   focus_subscription : @common.Disposable
 }
 
@@ -619,13 +620,13 @@ fn semantic_diff_options(
     diff_word_wrap=@viewer.Off,
     overview_ruler=false,
     render_indicators=true,
-    render_markdown_comments=false,
+    render_markdown_comments=true,
     handle_mouse_wheel=false,
-    // Semantic diff items must expose comment changes as source rows. Rich
-    // documentation replaces and hides those rows, which makes a comment-only
-    // MoonDiff section look unchanged even though its fragment is correct.
-    // The outer MultiDiff scroll plane owns wheel input, matching VS Code's
-    // per-item `handleMouseWheel: false` configuration.
+    // Token/Tree use the same rich, initially folded Markdown-comment
+    // presentation as ordinary code reading and Core diff. MoonDiff has already
+    // decided which sections exist, so presentation must not fall back to raw
+    // `///` rows. The outer MultiDiff scroll plane owns wheel input, matching
+    // VS Code's per-item `handleMouseWheel: false` configuration.
   )
 }
 
@@ -934,30 +935,35 @@ fn semantic_estimated_height(
 }
 
 ///|
-fn resize_semantic_review_editor(key : String) -> Unit {
-  guard semantic_review_editors.get(key) is Some(entry) &&
-    @base_browser.element_is_connected(entry.host) else {
+/// Commit one final DiffEditor height to its MultiDiff item. The content-height
+/// event can arrive while `create_semantic_review_editor` is still constructing
+/// the map entry, so this helper deliberately captures the concrete host and
+/// editor instead of looking them up by key.
+fn apply_semantic_review_editor_height(
+  host : @dom.Element,
+  editor : @viewer.DiffEditor,
+  content_height : Double,
+) -> Unit {
+  if !@base_browser.element_is_connected(host) {
     return
   }
-  let content_height = entry.editor.get_content_height()
   if content_height <= 0.0 {
     return
   }
   let height = (content_height.ceil() + 2.0).max(40.0)
   let css_height = "\{height}px"
-  if @base_browser.element_style_value(entry.host, "height") != css_height {
-    @base_browser.set_style_property(entry.host, "height", css_height)
-    entry.editor.layout()
+  if @base_browser.element_style_value(host, "height") != css_height {
+    @base_browser.set_style_property(host, "height", css_height)
+    editor.layout()
   }
-  update_semantic_review_scroll_width()
 }
 
 ///|
-fn schedule_semantic_review_editor_resize(key : String) -> Unit {
+fn schedule_semantic_review_scroll_width_update() -> Unit {
   @dom.window().request_animation_frame(_ => {
-    resize_semantic_review_editor(key)
+    update_semantic_review_scroll_width()
     @dom.window().request_animation_frame(_ => {
-      resize_semantic_review_editor(key)
+      update_semantic_review_scroll_width()
     })
     |> ignore
   })
@@ -966,7 +972,8 @@ fn schedule_semantic_review_editor_resize(key : String) -> Unit {
 
 ///|
 fn dispose_semantic_review_editor(entry : SemanticReviewEditorHost) -> Unit {
-  entry.subscription.dispose()
+  entry.diff_subscription.dispose()
+  entry.content_height_subscription.dispose()
   entry.focus_subscription.dispose()
   match entry.editor.set_model(None) {
     Some(previous) => {
@@ -1054,8 +1061,19 @@ fn create_semantic_review_editor(
     }
   }
   let key = section.key
-  let subscription = editor.on_did_update_diff(() => {
-    schedule_semantic_review_editor_resize(key)
+  // Diff readiness still owns the post-render horizontal overflow refresh.
+  // Vertical Markdown/ViewZone changes use the paired content-height event
+  // below and do not wait for these compatibility layout frames.
+  let diff_subscription = editor.on_did_update_diff(() => {
+    schedule_semantic_review_scroll_width_update()
+  })
+  // DiffEditor publishes only after the comment ViewZone and both panes'
+  // derived alignment zones have committed. Resize synchronously in that same
+  // geometry batch; a delayed retry would only hide a missing notification and
+  // leave this MultiDiff item displaying a stale intermediate height.
+  let content_height_subscription = editor.on_did_change_content_height(content_height => {
+    apply_semantic_review_editor_height(host, editor, content_height)
+    update_semantic_review_scroll_width()
   })
   let focus_listener : @dom.Listener = _ => {
     semantic_review_active_key.val = Some(key)
@@ -1091,7 +1109,8 @@ fn create_semantic_review_editor(
     host,
     editor,
     provider,
-    subscription,
+    diff_subscription,
+    content_height_subscription,
     focus_subscription,
   })
 }
@@ -1108,35 +1127,35 @@ fn semantic_sections(
 
 ///|
 fn layout_semantic_review_editors() -> Unit {
-  for key, entry in semantic_review_editors {
+  for _, entry in semantic_review_editors {
     entry.editor.layout()
-    schedule_semantic_review_editor_resize(key)
   }
   update_semantic_review_scroll_width()
+  schedule_semantic_review_scroll_width_update()
 }
 
 ///|
 fn update_semantic_review_editor_layout(layout : ReviewDiffLayout) -> Unit {
-  for key, entry in semantic_review_editors {
+  for _, entry in semantic_review_editors {
     entry.editor.update_options(semantic_diff_options(layout))
     entry.editor.layout()
-    schedule_semantic_review_editor_resize(key)
   }
   update_semantic_review_scroll_width()
+  schedule_semantic_review_scroll_width_update()
 }
 
 ///|
 fn refresh_semantic_review_editor_options() -> Unit {
-  for key, entry in semantic_review_editors {
+  for _, entry in semantic_review_editors {
     let layout = match entry.editor.get_layout() {
       @viewer.SideBySide => ReviewSideBySide
       @viewer.Inline => ReviewInline
     }
     entry.editor.update_options(semantic_diff_options(layout))
     entry.editor.layout()
-    schedule_semantic_review_editor_resize(key)
   }
   update_semantic_review_scroll_width()
+  schedule_semantic_review_scroll_width_update()
 }
 
 ///|
@@ -1295,7 +1314,6 @@ fn sync_semantic_review_editors(state : State) -> @cmd.Cmd {
             semantic_diff_options(state.review_diff_layout),
           )
           entry.editor.layout()
-          schedule_semantic_review_editor_resize(key)
           continue
         }
         if semantic_review_editors.get(key) is Some(previous) {
@@ -1310,10 +1328,10 @@ fn sync_semantic_review_editors(state : State) -> @cmd.Cmd {
           )
           is Some(entry) {
           semantic_review_editors[key] = entry
-          schedule_semantic_review_editor_resize(key)
         }
       }
       update_semantic_review_scroll_width()
+      schedule_semantic_review_scroll_width_update()
     },
     kind=@cmd.after_render,
   )

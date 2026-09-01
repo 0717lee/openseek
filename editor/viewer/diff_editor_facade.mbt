@@ -246,6 +246,16 @@ pub fn DiffEditor::get_content_height(self : DiffEditor) -> Double {
 }
 
 ///|
+/// Fires when a complete paired geometry reconciliation changes the final
+/// maximum content height, after derived alignment zones have committed.
+pub fn DiffEditor::on_did_change_content_height(
+  self : DiffEditor,
+  listener : (Double) -> Unit,
+) -> @base_common.Disposable {
+  self.widget.on_did_change_content_height(listener)
+}
+
+///|
 /// Horizontal overflow exposed for VS Code-shaped MultiDiffEditor hosts.
 pub fn DiffEditor::get_max_scroll_left(self : DiffEditor) -> Double {
   self.widget.get_max_scroll_left()

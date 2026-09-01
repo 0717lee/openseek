@@ -235,6 +235,10 @@ fn compile_external_viewer_api_contract(
     options=diff_options,
   )
   let diff_subscription = diff_editor.on_did_update_diff(() => ())
+  let diff_content_height_subscription = diff_editor.on_did_change_content_height(_height => {
+      ()
+    },
+  )
   let diff_model = @viewer.DiffEditorModel(model, model)
   diff_editor.set_model(Some(diff_model)) |> ignore
   diff_editor.reveal_first_diff()
@@ -254,6 +258,7 @@ fn compile_external_viewer_api_contract(
   // compile-only contract intentionally leaves the borrowed model alive.
   diff_editor.set_model(None) |> ignore
   diff_subscription.dispose()
+  diff_content_height_subscription.dispose()
   diff_editor.dispose()
 
   // Explicit bundles and concrete backings remain caller-owned.

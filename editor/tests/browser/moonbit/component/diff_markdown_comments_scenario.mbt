@@ -90,6 +90,47 @@ fn diff_markdown_comment_partial_modified_source() -> String {
 }
 
 ///|
+priv struct DiffMarkdownCommentProvider {}
+
+///|
+impl @language.MarkdownCommentProvider for DiffMarkdownCommentProvider with fn provide_markdown_comments(
+  _self,
+  model,
+) {
+  let snapshot = model.snapshot()
+  let blocks : Array[@language.MarkdownCommentBlock] = []
+  let mut line_number = 1
+  while line_number <= snapshot.line_count() {
+    let line = snapshot.get_line_content(line_number).trim().to_owned()
+    if !line.has_prefix("///") {
+      line_number += 1
+      continue
+    }
+    let start_line_number = line_number
+    let markdown : Array[String] = []
+    while line_number <= snapshot.line_count() {
+      let line = snapshot.get_line_content(line_number).trim().to_owned()
+      if !line.has_prefix("///") {
+        break
+      }
+      let mut content_start = 3
+      if content_start < line.length() && line[content_start].to_int() == 32 {
+        content_start += 1
+      }
+      markdown.push(
+        line.unsafe_substring(start=content_start, end=line.length()),
+      )
+      line_number += 1
+    }
+    blocks.push({
+      line_range: LineRange(start_line_number, line_number),
+      markdown: "---\n\n" + markdown.join("\n"),
+    })
+  }
+  blocks
+}
+
+///|
 fn run_diff_markdown_comments_test() -> Unit {
   let document = @rdom.document()
   guard document.query_selector("#app").to_option() is Some(app) else {
@@ -111,6 +152,11 @@ fn run_diff_markdown_comments_test() -> Unit {
   })
   languages.set_tokens_provider("moonbit", @lang_moonbit.MoonBitTokenizer())
   |> ignore
+  let markdown_registration = languages.register_markdown_comment_provider(
+    LanguageId("moonbit"),
+    DiffMarkdownCommentProvider::{ },
+    foldable=true,
+  )
   let services = @viewer.ViewerServices(
     languages=languages.language_handle(log_service.log_handle()),
     log_service=log_service.log_handle(),
@@ -129,6 +175,25 @@ fn run_diff_markdown_comments_test() -> Unit {
       automatic_inline=false,
     ),
   )
+  let content_height_event_count = Ref(0)
+  let auto_height_enabled = Ref(false)
+  let apply_content_height = content_height => {
+    if content_height <= 0.0 {
+      return
+    }
+    @base_browser.set_style_property(
+      host,
+      "height",
+      "\{(content_height.ceil() + 2.0).max(40.0)}px",
+    )
+    diff_editor.layout()
+  }
+  let content_height_subscription = diff_editor.on_did_change_content_height(content_height => {
+    content_height_event_count.val += 1
+    if auto_height_enabled.val {
+      apply_content_height(content_height)
+    }
+  })
   let unchanged_original = diff_markdown_comment_model(
     "unchanged-original",
     diff_markdown_comment_unchanged_source(),
@@ -189,6 +254,13 @@ fn run_diff_markdown_comments_test() -> Unit {
       diff_editor.layout()
     },
     () => {
+      auto_height_enabled.val = true
+      apply_content_height(diff_editor.get_content_height())
+    },
+    () => content_height_event_count.val,
+    () => diff_editor.get_content_height(),
+    () => {
+      content_height_subscription.dispose()
       diff_editor.dispose()
       unchanged_original.dispose()
       unchanged_modified.dispose()
@@ -196,6 +268,7 @@ fn run_diff_markdown_comments_test() -> Unit {
       replacement_modified.dispose()
       partial_original.dispose()
       partial_modified.dispose()
+      markdown_registration.dispose()
       services.dispose()
     },
   )
@@ -207,14 +280,20 @@ extern "js" fn install_diff_markdown_comments_controls(
   set_fixture : (String) -> Unit,
   set_layout : (String) -> Unit,
   resize : (Int) -> Unit,
+  enable_auto_height : () -> Unit,
+  content_height_event_count : () -> Int,
+  content_height : () -> Double,
   dispose : () -> Unit,
 ) -> Unit =
-  #| (initialHiddenOriginalComments, setFixture, setLayout, resize, dispose) => {
+  #| (initialHiddenOriginalComments, setFixture, setLayout, resize, enableAutoHeight, contentHeightEventCount, contentHeight, dispose) => {
   #|   globalThis.__diffMarkdownCommentsControls = Object.freeze({
   #|     initialHiddenOriginalComments,
   #|     set_fixture: setFixture,
   #|     set_layout: setLayout,
   #|     resize,
+  #|     enable_auto_height: enableAutoHeight,
+  #|     content_height_event_count: contentHeightEventCount,
+  #|     content_height: contentHeight,
   #|     dispose,
   #|   });
   #| }
