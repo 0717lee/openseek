@@ -2303,7 +2303,7 @@ pub fn update(
     }
     ToggleReviewDiffIgnoreComments => {
       guard moon_diff_ready(state, ctx) &&
-        state.review_diff_mode != ReviewDiffCore else {
+        state.review_diff_mode != ReviewDiffLine else {
         return (@cmd.none, state)
       }
       let ignore_comments = !state.review_diff_ignore_comments
@@ -2311,7 +2311,7 @@ pub fn update(
     }
     ToggleReviewDiffIgnoreTests => {
       guard moon_diff_ready(state, ctx) &&
-        state.review_diff_mode != ReviewDiffCore else {
+        state.review_diff_mode != ReviewDiffLine else {
         return (@cmd.none, state)
       }
       let ignore_tests = !state.review_diff_ignore_tests
@@ -2340,7 +2340,7 @@ pub fn update(
       guard review_diff_navigation_enabled(state, ctx) else {
         return (@cmd.none, state)
       }
-      if core_diff_ready(state, ctx) {
+      if line_diff_ready(state, ctx) {
         (reveal_previous_review_diff_change(), state)
       } else {
         (
@@ -2357,7 +2357,7 @@ pub fn update(
       guard review_diff_navigation_enabled(state, ctx) else {
         return (@cmd.none, state)
       }
-      if core_diff_ready(state, ctx) {
+      if line_diff_ready(state, ctx) {
         (reveal_next_review_diff_change(), state)
       } else {
         (
@@ -2371,7 +2371,7 @@ pub fn update(
       }
     }
     RevealSemanticReviewSectionChange(key, reveal_last) => {
-      guard !core_diff_ready(state, ctx) &&
+      guard !line_diff_ready(state, ctx) &&
         semantic_sections(state.semantic_review_plan).any(section => {
           section.key == key
         }) else {

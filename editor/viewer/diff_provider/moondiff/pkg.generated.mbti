@@ -15,7 +15,7 @@ pub fn compute_sectioned_semantic_review_plan(String, String, MoonDiffMode, old_
 
 // Types and methods
 pub(all) enum MoonDiffMode {
-  Core
+  Line
   Token
   Tree
 } derive(Eq, @debug.Debug)
@@ -42,7 +42,7 @@ pub fn SectionedSemanticReviewPlan::not_equal(Self, Self) -> Bool
 pub fn SectionedSemanticReviewPlan::to_repr(Self) -> @debug.Repr
 
 pub(all) enum SemanticReviewDiff {
-  Core
+  Line
   Fragment(@diff.DocumentDiff)
 } derive(Eq, @debug.Debug)
 pub fn SemanticReviewDiff::equal(Self, Self) -> Bool

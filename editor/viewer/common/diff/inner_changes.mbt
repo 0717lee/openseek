@@ -1,4 +1,4 @@
-// Character-level refinement for one line-level diff hunk. Core diff compares
+// Character-level refinement for one line-level diff hunk. Line diff compares
 // Unicode scalar values so a supplementary character remains atomic, while
 // the parallel boundary table retains the Viewer's one-based UTF-16 columns.
 // Newline sentinels let matching continue across a multi-line replacement.

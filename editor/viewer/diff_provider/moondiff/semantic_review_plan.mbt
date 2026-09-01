@@ -25,10 +25,10 @@ pub(all) enum SemanticReviewSectionKind {
 
 ///|
 /// The provider used inside one section DiffEditor. Inserted and deleted
-/// declarations use Core because one model is intentionally empty; matched
+/// declarations use Line because one model is intentionally empty; matched
 /// and whole fragments retain MoonDiff's local intraline result.
 pub(all) enum SemanticReviewDiff {
-  Core
+  Line
   Fragment(@diff.DocumentDiff)
 } derive(Eq, Debug)
 
@@ -185,7 +185,7 @@ fn section_diff(
   one_sided : Bool,
 ) -> SemanticReviewDiff? {
   if one_sided {
-    return Some(Core)
+    return Some(Line)
   }
   fragment_document_diff(fragment.document, original_source, modified_source).map(diff => {
       Fragment(diff)
@@ -381,7 +381,7 @@ fn top_level_plan(
 
 ///|
 /// Compute section ownership and fragment-local DiffEditor inputs for Token or
-/// Tree mode. Core remains the ordinary full-file DiffEditor path.
+/// Tree mode. Line remains the ordinary full-file DiffEditor path.
 pub fn compute_sectioned_semantic_review_plan(
   old_source : String,
   new_source : String,
@@ -392,7 +392,7 @@ pub fn compute_sectioned_semantic_review_plan(
   ignore_tests? : Bool = true,
 ) -> SectionedSemanticReviewPlan? {
   let diff_mode = match mode {
-    Core => return None
+    Line => return None
     Token => @mbtdiff.DiffMode::Lexical
     Tree => Ast
   }

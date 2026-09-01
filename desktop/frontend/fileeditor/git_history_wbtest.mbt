@@ -219,7 +219,7 @@ test "historical tabs use only the inert diff surface and history controls" {
     render_review_control(review_diff_mode_toolbar(test_emit(), state, ctx)),
     content=(
       #|<div role="toolbar" aria-label="Comparison algorithm" class="review-mode-toolbar review-history-mode-toolbar">
-      #|<button data-diff-mode="core" aria-label="Line diff" aria-pressed="true" title="Use Line diff" type="button" class="review-mode-button active">Line</button>
+      #|<button data-diff-mode="line" aria-label="Line diff" aria-pressed="true" title="Use Line diff" type="button" class="review-mode-button active">Line</button>
       #|<button data-diff-mode="token" aria-label="Token diff" aria-pressed="false" title="Use Token diff" type="button" class="review-mode-button">Token</button>
       #|<button data-diff-mode="tree" aria-label="Tree diff" aria-pressed="false" title="Use Tree diff" type="button" class="review-mode-button">Tree</button>
       #|</div>

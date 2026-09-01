@@ -1,4 +1,4 @@
-// Renderer-neutral mapping values used by both the built-in Core provider and
+// Renderer-neutral mapping values used by both the built-in Line provider and
 // external providers. They intentionally expose their representation: a
 // provider package must be able to construct validated output without a
 // viewer-layer adapter.

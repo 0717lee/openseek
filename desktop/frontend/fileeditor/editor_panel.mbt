@@ -1,5 +1,5 @@
 // The embedded read-only code viewer (moonbitlang/editor). Rabbita has
-// no escape hatch for a foreign DOM widget, so the source viewer and Core
+// no escape hatch for a foreign DOM widget, so the source viewer and Line
 // full-file comparison each own a stable, never-diffed host element. The view
 // renders those hosts empty, and after the first paint each widget attaches its
 // imperative DOM. Token/Tree uses a fourth stable sibling containing keyed,

@@ -155,7 +155,7 @@ fn DiffEditorOptions::internal(
 /// directly owns two CodeEditorWidget kernels and the shared diff ViewModel.
 struct DiffEditor {
   widget : @diff_editor.DiffEditorWidget
-  owned_core_provider : @diff.CoreDocumentDiffProvider?
+  owned_line_provider : @diff.LineDocumentDiffProvider?
 }
 
 ///|
@@ -165,12 +165,12 @@ pub fn DiffEditor::create(
   options? : DiffEditorOptions = DiffEditorOptions::default(),
   provider? : &@diff.DocumentDiffProvider,
 ) -> DiffEditor {
-  let (provider, owned_core_provider) = match provider {
+  let (provider, owned_line_provider) = match provider {
     Some(provider) => (provider, None)
     None => {
-      let core = @diff.CoreDocumentDiffProvider()
-      let provider : &@diff.DocumentDiffProvider = core
-      (provider, Some(core))
+      let line = @diff.LineDocumentDiffProvider()
+      let provider : &@diff.DocumentDiffProvider = line
+      (provider, Some(line))
     }
   }
   let widget = match services {
@@ -190,7 +190,7 @@ pub fn DiffEditor::create(
         options=options.internal(),
       )
   }
-  { widget, owned_core_provider, }
+  { widget, owned_line_provider, }
 }
 
 ///|
@@ -339,9 +339,9 @@ pub fn DiffEditor::focus(self : DiffEditor) -> Unit {
 ///|
 pub fn DiffEditor::dispose(self : DiffEditor) -> Unit {
   self.widget.dispose()
-  // The empty Core provider has no disposal work; touching the field here
+  // The empty Line provider has no disposal work; touching the field here
   // documents and preserves its lifetime until after the ViewModel is gone.
-  match self.owned_core_provider {
+  match self.owned_line_provider {
     Some(_) => ()
     None => ()
   }

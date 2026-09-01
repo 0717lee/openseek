@@ -4,7 +4,7 @@
 // resource, so the source's reference-counted per-resource model (throttled
 // recompute, provider merge, `compareChanges` sort) collapses to
 // `compute_changes` — the `_diff` method's pipeline (`quickDiffModel.ts:348`:
-// `editorWorkerService.computeDiff`) over the Core-diff-backed default computer.
+// `editorWorkerService.computeDiff`) over the Line-diff-backed default computer.
 // The decoration layer consumes its detailed line mappings directly, so the
 // source's intermediate line-change re-encoding is unnecessary.
 //
@@ -19,14 +19,14 @@
 /// line-level changes between the original document and the modified one.
 /// The trim-whitespace default mirrors
 /// `scm.diffDecorationsIgnoreTrimWhitespace`'s `'false'` default
-/// (`scm.contribution.ts:239`). The local Core provider is synchronous and
+/// (`scm.contribution.ts:239`). The local Line provider is synchronous and
 /// has no wall-clock budget option.
 pub fn compute_changes(
   original_lines : Array[String],
   modified_lines : Array[String],
   ignore_trim_whitespace? : Bool = false,
 ) -> Array[@diff.DetailedLineRangeMapping] {
-  @diff.CoreDocumentDiffProvider().compute_diff(
+  @diff.LineDocumentDiffProvider().compute_diff(
     TextSnapshot(original_lines.join("\n")),
     TextSnapshot(modified_lines.join("\n")),
     { ignore_trim_whitespace, },

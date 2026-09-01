@@ -24,7 +24,7 @@ let strict_options : @diff.DocumentDiffOptions = {
 
 ///|
 test "an edited line maps original and modified ranges" {
-  let result = @diff.get_core_document_diff_provider().compute_diff(
+  let result = @diff.get_line_document_diff_provider().compute_diff(
     TextSnapshot("fn main {\n  println(1)\n}"),
     TextSnapshot("fn main {\n  println(2)\n}"),
     strict_options,
@@ -42,7 +42,7 @@ range. Identical inputs produce no changes.
 ```mbt check
 ///|
 test "insertions keep half-open line-range semantics" {
-  let inserted = @diff.get_core_document_diff_provider().compute_diff(
+  let inserted = @diff.get_line_document_diff_provider().compute_diff(
     TextSnapshot("a\nc"),
     TextSnapshot("a\nb\nc"),
     strict_options,
@@ -53,9 +53,9 @@ test "insertions keep half-open line-range semantics" {
 }
 ```
 
-## Advanced readability core
+## Advanced line diff
 
-`CoreDocumentDiffProvider` keeps its established public name and
+`LineDocumentDiffProvider` exposes the built-in line-diff implementation and
 `DocumentDiff` contract, but its private pipeline ports the readability-critical
 parts of VS Code's Advanced diff from pinned revision
 `07c20d96cf3f2cbc8142ac7079ba9048cf7f6134`. The port mode is
@@ -88,7 +88,7 @@ option: providers expose only semantics they implement.
 ```mbt check
 ///|
 test "trim whitespace can ignore re-indentation" {
-  let provider = @diff.CoreDocumentDiffProvider()
+  let provider = @diff.LineDocumentDiffProvider()
   let original = @model.TextSnapshot("fn main {\nprintln(1)\n}")
   let modified = @model.TextSnapshot("fn main {\n  println(1)\n}")
   let strict = provider.compute_diff(original, modified, strict_options)

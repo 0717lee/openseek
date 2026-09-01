@@ -6,12 +6,12 @@
 
 ///|
 /// Stateless built-in document diff provider.
-pub struct CoreDocumentDiffProvider {
+pub struct LineDocumentDiffProvider {
   _unit : Unit
 } derive(Eq, Debug)
 
 ///|
-pub fn CoreDocumentDiffProvider::CoreDocumentDiffProvider() -> CoreDocumentDiffProvider {
+pub fn LineDocumentDiffProvider::LineDocumentDiffProvider() -> LineDocumentDiffProvider {
   { _unit: (), }
 }
 
@@ -25,8 +25,8 @@ fn snapshot_lines(snapshot : @model.TextSnapshot) -> Array[String] {
 }
 
 ///|
-pub fn CoreDocumentDiffProvider::compute_diff(
-  self : CoreDocumentDiffProvider,
+pub fn LineDocumentDiffProvider::compute_diff(
+  self : LineDocumentDiffProvider,
   original : @model.TextSnapshot,
   modified : @model.TextSnapshot,
   options : DocumentDiffOptions,
@@ -39,8 +39,8 @@ pub fn CoreDocumentDiffProvider::compute_diff(
 }
 
 ///|
-fn CoreDocumentDiffProvider::compute_lines_diff(
-  self : CoreDocumentDiffProvider,
+fn LineDocumentDiffProvider::compute_lines_diff(
+  self : LineDocumentDiffProvider,
   original_lines : Array[String],
   modified_lines : Array[String],
   options : DocumentDiffOptions,
@@ -119,7 +119,7 @@ fn CoreDocumentDiffProvider::compute_lines_diff(
 }
 
 ///|
-pub impl DocumentDiffProvider for CoreDocumentDiffProvider with fn compute_diff(
+pub impl DocumentDiffProvider for LineDocumentDiffProvider with fn compute_diff(
   self,
   original,
   modified,
@@ -129,7 +129,7 @@ pub impl DocumentDiffProvider for CoreDocumentDiffProvider with fn compute_diff(
 }
 
 ///|
-pub impl DocumentDiffProvider for CoreDocumentDiffProvider with fn on_did_change(
+pub impl DocumentDiffProvider for LineDocumentDiffProvider with fn on_did_change(
   _self,
   _listener,
 ) {
@@ -137,10 +137,10 @@ pub impl DocumentDiffProvider for CoreDocumentDiffProvider with fn on_did_change
 }
 
 ///|
-pub extend CoreDocumentDiffProvider with Debug::{to_repr}
+pub extend LineDocumentDiffProvider with Debug::{to_repr}
 
 ///|
-pub extend CoreDocumentDiffProvider with Eq::{equal, not_equal}
+pub extend LineDocumentDiffProvider with Eq::{equal, not_equal}
 
 ///|
-pub extend CoreDocumentDiffProvider with DocumentDiffProvider::{on_did_change}
+pub extend LineDocumentDiffProvider with DocumentDiffProvider::{on_did_change}

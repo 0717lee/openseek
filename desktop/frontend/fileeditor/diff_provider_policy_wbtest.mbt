@@ -7,7 +7,7 @@ test "semantic review is available only for MoonBit source files" {
 ///|
 test "selecting a Moon semantic algorithm enters Diff view and retains policy" {
   let initial = State::empty()
-  assert_true(initial.review_diff_mode is ReviewDiffCore)
+  assert_true(initial.review_diff_mode is ReviewDiffLine)
   assert_true(initial.review_diff_ignore_comments)
   assert_true(initial.review_diff_ignore_tests)
 
@@ -26,13 +26,13 @@ test "selecting a Moon semantic algorithm enters Diff view and retains policy" {
   }
   let state = { ..owned_state(), docs, review_view_mode: ReviewSource, }
   let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path), }
-  let (_, core_unchanged) = update(
+  let (_, line_unchanged) = update(
     test_emit(),
     ToggleReviewDiffIgnoreTests,
     state,
     ctx,
   )
-  assert_true(core_unchanged == state)
+  assert_true(line_unchanged == state)
   let (_, tree) = update(
     test_emit(),
     ReviewDiffModeSelected(ReviewDiffTree),

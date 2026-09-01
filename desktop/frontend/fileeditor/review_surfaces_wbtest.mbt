@@ -79,7 +79,7 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
       #|<button data-review-mode="file" aria-label="File view" aria-pressed="true" title="Show file" type="button" class="review-mode-button active">File</button>
       #|<span aria-hidden="true" class="review-mode-divider">
       #|</span>
-      #|<button data-diff-mode="core" aria-label="Line diff" aria-pressed="false" title="Use Line diff" type="button" class="review-mode-button">Line</button>
+      #|<button data-diff-mode="line" aria-label="Line diff" aria-pressed="false" title="Use Line diff" type="button" class="review-mode-button">Line</button>
       #|<button data-diff-mode="token" aria-label="Token diff" aria-pressed="false" title="Use Token diff" type="button" class="review-mode-button">Token</button>
       #|<button data-diff-mode="tree" aria-label="Tree diff" aria-pressed="false" title="Use Tree diff" type="button" class="review-mode-button">Tree</button>
       #|</div>
@@ -163,7 +163,7 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
       #|<button data-review-mode="file" aria-label="File view" aria-pressed="false" title="Show file" type="button" class="review-mode-button">File</button>
       #|<span aria-hidden="true" class="review-mode-divider">
       #|</span>
-      #|<button data-diff-mode="core" aria-label="Line diff" aria-pressed="true" title="Use Line diff" type="button" class="review-mode-button active">Line</button>
+      #|<button data-diff-mode="line" aria-label="Line diff" aria-pressed="true" title="Use Line diff" type="button" class="review-mode-button active">Line</button>
       #|<button data-diff-mode="token" aria-label="Token diff" aria-pressed="false" title="Use Token diff" type="button" class="review-mode-button">Token</button>
       #|<button data-diff-mode="tree" aria-label="Tree diff" aria-pressed="false" title="Use Tree diff" type="button" class="review-mode-button">Tree</button>
       #|</div>
@@ -410,7 +410,7 @@ test "desktop explicitly routes Markdown source while DiffEditor stays code-only
 }
 
 ///|
-test "non-MoonBit review keeps File and Line on the Core surface" {
+test "non-MoonBit review keeps File and Line on the Line surface" {
   let path = @pathx.Relative("README.md")
   let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path), }
   let selected = test_modified_change(path)
@@ -452,7 +452,7 @@ test "non-MoonBit review keeps File and Line on the Core surface" {
       #|<button data-review-mode="file" aria-label="File view" aria-pressed="false" title="Show file" type="button" class="review-mode-button">File</button>
       #|<span aria-hidden="true" class="review-mode-divider">
       #|</span>
-      #|<button data-diff-mode="core" aria-label="Line diff" aria-pressed="true" title="Use Line diff" type="button" class="review-mode-button active">Line</button>
+      #|<button data-diff-mode="line" aria-label="Line diff" aria-pressed="true" title="Use Line diff" type="button" class="review-mode-button active">Line</button>
       #|</div>
     ),
   )

@@ -84,7 +84,7 @@ pub(all) enum ReviewViewMode {
 } derive(Eq)
 
 ///|
-/// The layout shared by Core and sectioned semantic comparison. This
+/// The layout shared by Line and sectioned semantic comparison. This
 /// panel-level preference is independent from `ReviewViewMode`: returning to
 /// source keeps it for the next review and the next changed file.
 pub(all) enum ReviewDiffLayout {
@@ -93,11 +93,11 @@ pub(all) enum ReviewDiffLayout {
 } derive(Eq)
 
 ///|
-/// Desktop-owned comparison algorithm preference. Core keeps the complete
+/// Desktop-owned comparison algorithm preference. Line keeps the complete
 /// file DiffEditor; Token and Tree select the sectioned semantic review.
-/// Non-MoonBit comparisons keep using Core without overwriting this preference.
+/// Non-MoonBit comparisons keep using Line without overwriting this preference.
 pub(all) enum ReviewDiffMode {
-  ReviewDiffCore
+  ReviewDiffLine
   ReviewDiffToken
   ReviewDiffTree
 } derive(Eq, Debug)
@@ -399,11 +399,11 @@ pub(all) struct State {
   // not force the reviewer to request the full diff again.
   review_view_mode : ReviewViewMode
   // Side-by-side/inline is likewise a reviewer preference rather than
-  // document state. Core applies it to its retained models; Token/Tree update
+  // document state. Line applies it to its retained models; Token/Tree update
   // the DiffEditor mounted inside every semantic section.
   review_diff_layout : ReviewDiffLayout
   // The requested MoonBit-aware algorithm and filtering policy are desktop
-  // preferences. Other file types keep rendering the Core surface while
+  // preferences. Other file types keep rendering the Line surface while
   // these values remain parked for the next `.mbt` comparison.
   review_diff_mode : ReviewDiffMode
   review_diff_ignore_comments : Bool
@@ -532,7 +532,7 @@ pub fn State::empty() -> State {
     search: @grep_search.State::empty(),
     review_view_mode: ReviewDiff,
     review_diff_layout: ReviewSideBySide,
-    review_diff_mode: ReviewDiffCore,
+    review_diff_mode: ReviewDiffLine,
     // Token/Tree starts from semantic production changes. Both explicit
     // toggles can restore comments/blank lines or test blocks when needed.
     review_diff_ignore_comments: true,
@@ -835,7 +835,7 @@ pub(all) enum Msg {
   ToggleReviewDiffLayout
   // Select the desktop-owned comparison mode. Token and Tree are accepted
   // only for a visible `.mbt` comparison; other files keep the preference
-  // parked while rendering Core.
+  // parked while rendering Line.
   ReviewDiffModeSelected(ReviewDiffMode)
   ToggleReviewDiffIgnoreComments
   ToggleReviewDiffIgnoreTests

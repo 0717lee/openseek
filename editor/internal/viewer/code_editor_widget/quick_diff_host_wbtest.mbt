@@ -1,5 +1,5 @@
 // Headless end-to-end tests for the quick-diff contribution: service
-// original → Core-diff-backed computer → gutter decorations on the model,
+// original → Line-diff-backed computer → gutter decorations on the model,
 // through the registered `quickDiff.decorator` contribution.
 
 ///|
