@@ -122,8 +122,8 @@ fn PackageOptions::parse(argv? : ArrayView[String]) -> PackageOptions raise {
 
 ///|
 /// Build the exact Proton command arguments for this package selection. The
-/// release flag must reach Proton even with `--no-build`, because Proton uses
-/// it to select the native host from its debug or release target directory.
+/// The release flag must reach Proton so it selects the native host from the
+/// matching debug or release target directory.
 fn PackageOptions::proton_args(
   self : PackageOptions,
   workspace : @packaging.Workspace,
@@ -134,18 +134,17 @@ fn PackageOptions::proton_args(
     "package",
     "--config",
     "proton.project.json",
-    "--no-build",
-    "--target",
+    "--format",
     "app",
   ]
   if self.release {
     args.push("--release")
   }
   if self.artifacts.zip {
-    args.append(["--target", "zip"])
+    args.append(["--format", "zip"])
   }
   if self.artifacts.dmg {
-    args.append(["--target", "dmg"])
+    args.append(["--format", "dmg"])
   }
   if self.sign.identity is Some(_) {
     args.push("--sign")
@@ -159,17 +158,13 @@ fn PackageOptions::proton_args(
 ///|
 /// Build the application-specific inputs Proton cannot infer from
 /// `proton.project.json`. The native host builds into the workspace's
-/// default `_build` tree in the selected mode, which is where
-/// `package --no-build` looks the executable up since lepus #116 removed
-/// the identifier-scoped package target directories.
+/// default `_build` tree in the selected mode, which is where Proton's package
+/// workflow reads the executable after its incremental build.
 async fn @packaging.Workspace::build_package_inputs(
   self : @packaging.Workspace,
   release~ : Bool,
 ) -> (@xterm_assets.Assets, @ripgrep_assets.Assets) {
-  let build_env = {
-    "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
-    "PROTON_PACKAGE_RPATH": "@executable_path/../Resources/proton/lib",
-  }
+  let build_env = { "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion }
   @packaging.ensure_cef_runtime(self, extra_env={
     "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
   })
@@ -190,7 +185,7 @@ async fn @packaging.Workspace::build_package_inputs(
 }
 
 ///|
-/// Rebuild the declarative resource tree consumed by `bundle.resources`.
+/// Rebuild the declarative resource tree consumed by `package.resources`.
 /// Proton preserves this project-relative tree below `Contents/Resources`;
 /// runtime lookup code deliberately knows this one stable prefix.
 async fn @packaging.Workspace::stage_package_inputs(
@@ -249,7 +244,7 @@ async fn @packaging.Workspace::stage_package_inputs(
     ["+x", PackageBinDir + "/openseek", PackageBinDir + "/rg"],
     dir=self.dir(),
   )
-  // Proton applies the static `bundle.sign.binaries` list to both ad-hoc and
+  // Proton applies the static `package.sign.binaries` list to both ad-hoc and
   // Developer ID signing, so every macOS app must stage these seed binaries.
   let target = @moonbit.moonbit_macos_arm64_toolchain()
   @moonbit.stage_moonbit_toolchain_seed(
@@ -270,9 +265,6 @@ async fn @packaging.Workspace::package_with_proton(
   let args = options.proton_args(self)
   let package_env : Map[String, String] = {
     "PROTON_MACOS_ENTITLEMENTS": self.at(SigningEntitlementsPath),
-    // The OpenSeek moon.work root is above this embedded Proton checkout, so
-    // package cannot discover the runtime manifest by walking the workspace.
-    "PROTON_NATIVE_DIST": @packaging.proton_runtime_dist(self).0,
   }
   match options.sign.identity {
     Some(identity) => package_env["PROTON_MACOS_SIGNING_IDENTITY"] = identity
@@ -334,11 +326,28 @@ test "macOS packaging accepts release builds" {
 async test "macOS packaging passes the selected mode to Proton" {
   let workspace = @packaging.locate_workspace()
   let debug_args = PackageOptions::parse(argv=[]).proton_args(workspace)
-  assert_false(debug_args.contains("--release"))
+  assert_eq(debug_args, [
+    "-C",
+    workspace.dir(),
+    "package",
+    "--config",
+    "proton.project.json",
+    "--format",
+    "app",
+  ])
   let release_args = PackageOptions::parse(argv=["--release"]).proton_args(
     workspace,
   )
-  assert_true(release_args.contains("--release"))
+  assert_eq(release_args, [
+    "-C",
+    workspace.dir(),
+    "package",
+    "--config",
+    "proton.project.json",
+    "--format",
+    "app",
+    "--release",
+  ])
 }
 
 ///|

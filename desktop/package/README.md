@@ -58,7 +58,7 @@ copy the results, and fail when a required source file is absent.
 
 | Platform | Installed command directory | Packager requirements |
 |---|---|---|
-| macOS | `SeekMoon.app/Contents/Resources/target/proton-package-input/bin/` | Stage under `target/proton-package-input/bin/`, make it executable, include it in Proton resources, and list executable code under `bundle.sign.binaries` in `desktop/proton.project.json`. |
+| macOS | `SeekMoon.app/Contents/Resources/target/proton-package-input/bin/` | Stage under `target/proton-package-input/bin/`, make it executable, include it in Proton resources, and list executable code under `package.sign.binaries` in `desktop/proton.project.json`. |
 | Linux | `SeekMoon.AppDir/usr/bin/` | Copy into `usr/bin`, add it to the `chmod +x` list, and ensure AppRun/library paths cover any shipped shared libraries. |
 | Windows | `dist/windows-x64/SeekMoon/` | Copy the `.exe` into the bundle root. Put required DLLs where the Windows loader actually searches, normally beside the executable. The portable ZIP and NSIS installer consume this whole directory. |
 
@@ -73,7 +73,7 @@ notices as well. Shipping only the executable is not license-complete.
 
 ### macOS code and signing
 
-`bundle.resources` copies files into the app, but executable code additionally
+`package.resources` copies files into the app, but executable code additionally
 needs signing coverage. Add every Mach-O executable and nested dynamic library
 to the Proton signing input expected by the current package configuration.
 Check whether the command needs entitlements; do not copy the Host's
