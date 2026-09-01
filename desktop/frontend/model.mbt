@@ -1277,9 +1277,6 @@ priv enum SelectMenu {
   FontSizeMenu
   NotificationCornerMenu
   TreeLayoutMenu
-  WorkspaceDefaultModeMenu
-  WorkspaceSubmodulesMenu
-  WorkspaceSubmoduleTimeoutMenu
 } derive(Eq)
 
 ///|

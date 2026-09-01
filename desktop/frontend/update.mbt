@@ -3813,7 +3813,6 @@ fn update_msg(
         return (@cmd.none, model)
       }
       let worktree_mode = value == "worktree"
-      let model = { ..model, select_menu: None, }
       // Apply optimistically under a fresh token, so a slower list reply
       // cannot roll the page's select back; the commit broadcast lands on a
       // newer token still. The failure path re-reads the disk state.
@@ -3840,7 +3839,6 @@ fn update_msg(
         "skip" => false
         _ => return (@cmd.none, model)
       }
-      let model = { ..model, select_menu: None, }
       // Preserve the workspace's launch mode locally and patch only the
       // submodule field on disk. The generation fence has the same job as
       // the launch-mode edit above: an older read cannot undo this choice.
@@ -3875,7 +3873,6 @@ fn update_msg(
         "60" => 60
         _ => return (@cmd.none, model)
       }
-      let model = { ..model, select_menu: None, }
       // Patch only the timeout and keep both neighboring workspace choices.
       // A fresh generation prevents an older read from undoing this select.
       let request_generation = dev.workspace_settings_request_generation + 1
