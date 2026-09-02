@@ -1,5 +1,5 @@
 // The display-ready forms of what the engine reports: transcript entries,
-// sidebar session entries, and parsed runtime updates. The decoders in this
+// sidebar session entries, and runtime notices. The decoders in this
 // package produce them from the host's wire data; the app's update and view
 // construct and consume them freely, so the types are fully public.
 
@@ -23,7 +23,7 @@ pub(all) enum ItemKind {
   // One tool call in its original assistant-message order. `call_id` pairs the
   // later durable result into this same item instead of adding a second row;
   // `arguments` is `Some` for a recorded call and `None` for an unmatched
-  // legacy result or a synthetic runtime update. `has_result` distinguishes a
+  // legacy result or a synthetic runtime notice. `has_result` distinguishes a
   // pending call from a completed call even when the legitimate result has
   // empty content, `is_error=false`, and no brief.
   Tool(
@@ -57,15 +57,6 @@ pub(all) struct TranscriptItem {
   // so the sequence is a stable identity for a user turn.
   sequence : Int?
 } derive(Eq)
-
-///|
-/// A `runtime_update` notice split into the watcher's status and the
-/// diagnostic lines worth showing. `status` is absent when the notice
-/// carried no `status=` assignment at all.
-pub struct RuntimeUpdateView {
-  status : String?
-  diagnostics : Array[String]
-}
 
 ///|
 /// One sidebar entry from the engine's durable session list: the session id
