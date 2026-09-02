@@ -1242,6 +1242,9 @@ fn apply_engine_event(
       ignore(content)
       if submission_id is Some(submission_id) {
         let (next, _) = conv.acknowledge_steer(submission_id, event_run_id)
+        // A queued row can receive its steer receipt before the direct queue
+        // RPC reply. The receipt is stronger: the text was consumed.
+        let (next, _) = next.remove_queued_input(submission_id)
         (None, next)
       } else {
         // Legacy receipt: lifecycle information only. Text is not ownership
@@ -3463,7 +3466,6 @@ fn update_msg(
         // in the composer.
         if conv.run is Open(run_id~, stage~) && !(stage is Cancelling) {
           if conv.queue_edit_id is Some(id) {
-            let (model, _) = model.allocate_submission_id()
             return (
               queue_openseek(
                 dispatch,
@@ -3474,13 +3476,9 @@ fn update_msg(
                 Some(task),
                 run_id,
               ),
-              model.replace_conversation({
-                ..conv,
-                task: "",
-                mentions: [],
-                composer_draft_present: false,
-                queue_edit_id: None,
-              }),
+              // Keep the edit in the composer until the in-memory mutation is
+              // accepted. A refusal then loses no user-authored text.
+              model,
             )
           }
           let (model, submission_id) = model.allocate_submission_id()
@@ -5516,10 +5514,48 @@ fn update_device_msg(
       } else {
         (@cmd.none, model)
       }
+    QueueAccepted(session~, action~, id~, text~, run_id~) => {
+      guard model.find_conversation(channel, session) is Some(conv) else {
+        return (@cmd.none, model)
+      }
+      let next = match action {
+        "add" => {
+          let (next, _) = conv.acknowledge_steer(id, Some(run_id))
+          next
+        }
+        "edit" => {
+          guard text is Some(content) &&
+            conv.queued_inputs.search_by(item => item.id == id) is Some(index) else {
+            return (@cmd.none, model)
+          }
+          let queued_inputs = conv.queued_inputs.copy()
+          queued_inputs[index] = { id, content, }
+          if conv.queue_edit_id == Some(id) {
+            {
+              ..conv,
+              queued_inputs,
+              task: "",
+              mentions: [],
+              composer_draft_present: false,
+              queue_edit_id: None,
+            }
+          } else {
+            { ..conv, queued_inputs, }
+          }
+        }
+        "withdraw" | "steer" => {
+          let (next, _) = conv.remove_queued_input(id)
+          next
+        }
+        _ => conv
+      }
+      (@cmd.none, model.replace_conversation(next))
+    }
     QueueAddRejected(session~, submission_id~, run_id~) =>
       if model.find_conversation(channel, session) is Some(conv) {
         let (next, removed) = conv.reject_steer(submission_id, Some(run_id))
         if removed {
+          let (next, _) = next.remove_queued_input(submission_id)
           model
           .replace_conversation(next)
           .notify_error(
@@ -6419,14 +6455,6 @@ fn update_device_msg(
         dispatch, channel, model, session, items, watermark, goal, goal_markers,
         generation, true,
       )
-    SessionQueueSnapshot(session~, queued_inputs~, generation~) => {
-      guard model.find_conversation(channel, session) is Some(conv) &&
-        conv.sync is Reloading(generation=current, ..) &&
-        current == generation else {
-        return (@cmd.none, model)
-      }
-      (@cmd.none, model.replace_conversation({ ..conv, queued_inputs, }))
-    }
     SessionRefreshed(
       session~,
       items~,
@@ -6780,6 +6808,21 @@ fn update_device_msg(
         // none must not move a placement the user chose. That reconcile
         // belongs to the session list.
         None => existing
+      }
+      // An automatically promoted follow-up is still transient until this
+      // ordinary Started boundary. Retire its in-memory queue row here; the
+      // corresponding User commit is the first durable representation of it.
+      let existing = if submission_id is Some(id) &&
+        existing.queued_inputs.iter().any(item => item.id == id) {
+        let (without_queue, _) = existing.remove_queued_input(id)
+        {
+          ..without_queue,
+          pending_steers: without_queue.pending_steers.filter(input => {
+            input.submission_id != id
+          }),
+        }
+      } else {
+        existing
       }
       let owned = submission_id is Some(id) &&
         existing.has_initial_submission(id)
@@ -7558,7 +7601,23 @@ fn update_device_msg(
         // The run is over, so nothing it carried can still acquire a receipt.
         // Whether each submission reached the store is the record's question;
         // the transcript answers it without a local placeholder.
+        let outcome = RunOutcome::parse(status)
         let settled_inputs = conv.clear_streams().forget_steers_for_run(run_id)
+        // A dead/aborted serve process loses its controller-owned queue. A
+        // normal terminal keeps it for the Started boundary that immediately
+        // promotes the next ordinary prompt.
+        let settled_inputs = match outcome {
+          Aborted | RunFailed | Unknown(_) =>
+            {
+              ..settled_inputs,
+              queued_inputs: [],
+              queue_edit_id: None,
+              pending_steers: settled_inputs.pending_steers.filter(input => {
+                input.behavior is FollowupSteer
+              }),
+            }
+          Completed | ContextYield | MaxStepsExhausted => settled_inputs
+        }
         // A question belonging to this run goes with it. The engine settles
         // its own on the way out, so what reaches here is the engine that
         // could not — a killed process emits no `approval_resolved` — and
@@ -7573,7 +7632,7 @@ fn update_device_msg(
         }
         let base = {
           ..settled_inputs,
-          run: NoRun(ended=Some(RunFinished(RunOutcome::parse(status)))),
+          run: NoRun(ended=Some(RunFinished(outcome))),
           last_run_id: Some(run_id),
           // A finish the user watched happen needs no reminder. Every other
           // completion is unread until its transcript is actually visible.

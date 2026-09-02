@@ -59,12 +59,6 @@ pub(all) struct TranscriptItem {
 } derive(Eq)
 
 ///|
-pub(all) struct QueuedInput {
-  id : String
-  content : String
-} derive(Eq)
-
-///|
 /// One sidebar entry from the engine's durable session list: the session id
 /// and its display title (first user message, already truncated engine-side;
 /// blank or absent for a session with no user message yet). `workspace` is
@@ -91,6 +85,3 @@ pub extend SessionListItem with Eq::{equal, not_equal}
 
 ///|
 pub extend TranscriptItem with Eq::{equal, not_equal}
-
-///|
-pub extend QueuedInput with Eq::{equal, not_equal}

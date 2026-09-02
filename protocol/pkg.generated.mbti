@@ -16,11 +16,6 @@ pub fn split_child_session_id(String) -> (String, Int)?
 pub(all) enum Command {
   Prompt(text~ : String, submission_id~ : String?)
   Steer(kind~ : SteerKind, text~ : String)
-  QueueAdd(id~ : String, text~ : String)
-  QueueEdit(id~ : String, text~ : String)
-  QueueWithdraw(id~ : String)
-  QueueSteer(id~ : String)
-  QueuePromote(id~ : String)
   Compact
   Cancel
   GoalSet(text~ : String, auto~ : Bool)

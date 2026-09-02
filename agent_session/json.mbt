@@ -103,39 +103,6 @@ pub impl FromJson for TurnTerminal with fn from_json(
 }
 
 ///|
-impl ToJson for QueueEvent with fn to_json(event : QueueEvent) -> Json {
-  match event {
-    Added(id~, content~) => { "action": "added", "id": id, "content": content }
-    Edited(id~, content~) =>
-      { "action": "edited", "id": id, "content": content }
-    Withdrawn(id~) => { "action": "withdrawn", "id": id }
-    Steered(id~) => { "action": "steered", "id": id }
-    Promoted(id~) => { "action": "promoted", "id": id }
-  }
-}
-
-///|
-pub impl FromJson for QueueEvent with fn from_json(
-  json : Json,
-  path : @json.JsonPath,
-) -> QueueEvent {
-  let fields = expect_object(json, path)
-  let id = string_field(fields, path, "id")
-  match string_field(fields, path, "action") {
-    "added" => Added(id~, content=string_field(fields, path, "content"))
-    "edited" => Edited(id~, content=string_field(fields, path, "content"))
-    "withdrawn" => Withdrawn(id~)
-    "steered" => Steered(id~)
-    "promoted" => Promoted(id~)
-    other =>
-      json_decode_error(
-        path.add_key("action"),
-        "unknown queue action: \{other}",
-      )
-  }
-}
-
-///|
 /// Encode a `SessionItem` as a tagged payload object.
 ///
 /// The JSON shape is `{ "kind": <tag>, "payload": <variant-json> }`. Tags are
@@ -147,7 +114,6 @@ impl ToJson for SessionItem with fn to_json(item : SessionItem) -> Json {
     Assistant(message) => ("assistant", ToJson::to_json(message))
     Tool(result) => ("tool_result", ToJson::to_json(result))
     Runtime(notice) => ("runtime_notice", ToJson::to_json(notice))
-    Queue(event) => ("queue", ToJson::to_json(event))
     Summary(summary) => ("summary", ToJson::to_json(summary))
     Terminal(terminal) => ("terminal", ToJson::to_json(terminal))
   }
@@ -177,7 +143,6 @@ pub impl FromJson for SessionItem with fn from_json(
       Tool(@json.from_json(payload, path=path.add_key("payload")))
     "runtime_notice" =>
       Runtime(@json.from_json(payload, path=path.add_key("payload")))
-    "queue" => Queue(@json.from_json(payload, path=path.add_key("payload")))
     "summary" => Summary(@json.from_json(payload, path=path.add_key("payload")))
     "terminal" =>
       Terminal(@json.from_json(payload, path=path.add_key("payload")))
@@ -259,9 +224,6 @@ pub extend SessionId with FromJson::{from_json}
 
 ///|
 pub extend SessionItem with FromJson::{from_json}
-
-///|
-pub extend QueueEvent with FromJson::{from_json}
 
 ///|
 pub extend TurnTerminal with FromJson::{from_json}

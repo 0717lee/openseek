@@ -481,26 +481,9 @@ fn event_card(
       )
     Tool(result) => tool_card(seq, time, result, escalated, tags, subrun)
     Runtime(notice) => runtime_card(seq, time, notice.content())
-    Queue(queue_event) => queue_event_card(seq, time, queue_event)
     Summary(summary) => summary_card(seq, time, summary)
     Terminal(terminal) => terminal_card(seq, time, terminal, step_label~)
   }
-}
-
-///|
-fn queue_event_card(
-  seq : Int,
-  time : String,
-  event : @agent_session.QueueEvent,
-) -> @html.Html {
-  let (label, content) = match event {
-    Added(content~, ..) => ("Message queued", content)
-    Edited(content~, ..) => ("Queued message edited", content)
-    Withdrawn(..) => ("Queued message withdrawn", "")
-    Steered(..) => ("Queued message steered", "")
-    Promoted(..) => ("Queued message promoted", "")
-  }
-  card("runtime queue", label, seq, time~, [text_block(content)])
 }
 
 ///|
@@ -1856,7 +1839,6 @@ fn terminal_projects_model_message(
 fn item_projects_model_message(item : @agent_session.SessionItem) -> Bool {
   match item {
     User(_) | Runtime(_) | Summary(_) | Assistant(_) | Tool(_) => true
-    Queue(_) => false
     Terminal(terminal) => terminal_projects_model_message(terminal)
   }
 }
@@ -1925,7 +1907,7 @@ fn model_message_origins(
       Runtime(_) => FromRuntime
       Summary(summary) =>
         FromSummary(from=summary.from_sequence(), to=summary.to_sequence())
-      Assistant(_) | Tool(_) | Terminal(_) | Queue(_) => Other
+      Assistant(_) | Tool(_) | Terminal(_) => Other
     }
   }
   model_message_labels(

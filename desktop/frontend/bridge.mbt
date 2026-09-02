@@ -1021,25 +1021,16 @@ fn open_session(
     workspace~,
     archived~,
     on_loaded=view => {
-      @cmd.batch([
-        dispatch(
-          SessionQueueSnapshot(
-            session=session_id,
-            queued_inputs=view.queued_inputs,
-            generation~,
-          ),
+      dispatch(
+        SessionLoaded(
+          session=session_id,
+          items=view.items,
+          watermark=view.watermark,
+          goal=view.goal,
+          goal_markers=view.goal_markers,
+          generation~,
         ),
-        dispatch(
-          SessionLoaded(
-            session=session_id,
-            items=view.items,
-            watermark=view.watermark,
-            goal=view.goal,
-            goal_markers=view.goal_markers,
-            generation~,
-          ),
-        ),
-      ])
+      )
     },
     on_failed=detail => {
       dispatch(
@@ -1076,25 +1067,16 @@ fn refresh_session(
     workspace~,
     archived~,
     on_loaded=view => {
-      @cmd.batch([
-        dispatch(
-          SessionQueueSnapshot(
-            session=session_id,
-            queued_inputs=view.queued_inputs,
-            generation~,
-          ),
+      dispatch(
+        SessionRefreshed(
+          session=session_id,
+          items=view.items,
+          watermark=view.watermark,
+          goal=view.goal,
+          goal_markers=view.goal_markers,
+          generation~,
         ),
-        dispatch(
-          SessionRefreshed(
-            session=session_id,
-            items=view.items,
-            watermark=view.watermark,
-            goal=view.goal,
-            goal_markers=view.goal_markers,
-            generation~,
-          ),
-        ),
-      ])
+      )
     },
     on_failed=_ => {
       dispatch(SessionRefreshFailed(session=session_id, generation~))
@@ -1323,6 +1305,10 @@ fn queue_openseek(
             ),
           )
         }
+      } else {
+        scheduler.add(
+          dispatch(QueueAccepted(session~, action~, id~, text~, run_id~)),
+        )
       }
     })
   })

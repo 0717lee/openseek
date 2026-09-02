@@ -380,26 +380,6 @@ pub(all) enum TurnTerminal {
 } derive(Eq, Debug)
 
 ///|
-/// One append-only transition of a user-authored prompt waiting for a future
-/// turn. Queue events are durable UI/control state; they never project into
-/// model history until `Promoted` is followed by the turn's ordinary `User`
-/// item.
-pub(all) enum QueueEvent {
-  Added(id~ : String, content~ : String)
-  Edited(id~ : String, content~ : String)
-  Withdrawn(id~ : String)
-  Steered(id~ : String)
-  Promoted(id~ : String)
-} derive(Eq, Debug)
-
-///|
-/// The current value reconstructed from a session's queue events.
-pub(all) struct QueuedInput {
-  id : String
-  content : String
-} derive(Eq, Debug)
-
-///|
 /// Payload vocabulary for one `SessionEvent`.
 ///
 /// `User` and `Runtime` project as user-role model messages. `Assistant`
@@ -424,9 +404,6 @@ pub(all) enum SessionItem {
   /// `runtime_notice`. Projection sends it as a user-role message even though it
   /// did not originate from the user's prompt.
   Runtime(RuntimeNotice)
-  /// Durable control state for a prompt waiting behind the active turn. JSON
-  /// tag: `queue`. Projection deliberately ignores it.
-  Queue(QueueEvent)
   /// Append-only compaction metadata for an inclusive event sequence range.
   /// JSON tag: `summary`. Projection skips covered earlier events when a later
   /// summary covers their sequence and emits the summary text instead.
@@ -764,18 +741,6 @@ pub extend SessionItem with Debug::{to_repr}
 #doc(hidden)
 #deprecated
 pub extend SessionItem with Eq::{equal, not_equal}
-
-///|
-pub extend QueueEvent with Debug::{to_repr}
-
-///|
-pub extend QueueEvent with Eq::{equal, not_equal}
-
-///|
-pub extend QueuedInput with Debug::{to_repr}
-
-///|
-pub extend QueuedInput with Eq::{equal, not_equal}
 
 ///|
 #doc(hidden)

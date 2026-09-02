@@ -49,7 +49,6 @@ fn append_item_message(
     User(message) => messages.push(ChatMessage(User, content=message.content()))
     Runtime(notice) =>
       messages.push(ChatMessage(User, content=notice.content()))
-    Queue(_) => ()
     Summary(summary) =>
       messages.push(ChatMessage(User, content=summary_model_content(summary)))
     Assistant(message) =>

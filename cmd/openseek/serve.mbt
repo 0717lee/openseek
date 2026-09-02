@@ -4,7 +4,6 @@
 priv enum ServeCommand {
   Prompt(String, submission_id~ : String?)
   Steer(@agent_runtime.SteerInput)
-  Queue(QueueAction)
   Compact
   Cancel
   Goal(GoalAction)
@@ -16,15 +15,6 @@ priv enum ServeCommand {
   /// tool that is already running and blocked, which is why it is dispatched
   /// from the loop but never queues behind active work.
   Approval(id~ : String, allow~ : Bool)
-}
-
-///|
-priv enum QueueAction {
-  AddQueued(id~ : String, text~ : String)
-  EditQueued(id~ : String, text~ : String)
-  WithdrawQueued(id~ : String)
-  SteerQueued(id~ : String)
-  PromoteQueued(id~ : String)
 }
 
 ///|
@@ -103,7 +93,6 @@ fn should_auto_continue(
 /// A queued serve-mode operation that must wait for active work to finish.
 priv enum PendingWork {
   PendingPrompt(String, submission_id~ : String?)
-  PendingQueued(String)
   PendingCompact
   // A goal marker holding its wire-order position behind a compaction: a
   // pending compaction must not cover a goal that arrived after the compact
@@ -189,11 +178,6 @@ fn decode_serve_command(json : Json) -> Result[ServeCommand, String] {
           },
         ),
       )
-    QueueAdd(id~, text~) => Ok(Queue(AddQueued(id~, text~)))
-    QueueEdit(id~, text~) => Ok(Queue(EditQueued(id~, text~)))
-    QueueWithdraw(id~) => Ok(Queue(WithdrawQueued(id~)))
-    QueueSteer(id~) => Ok(Queue(SteerQueued(id~)))
-    QueuePromote(id~) => Ok(Queue(PromoteQueued(id~)))
     Compact => Ok(Compact)
     Cancel => Ok(Cancel)
     GoalSet(text~, auto~) =>
@@ -243,15 +227,6 @@ test "serve commands decode and reject with actionable errors" {
   )
   assert_true(decode_serve_command({ "command": "compact" }) is Ok(Compact))
   assert_true(decode_serve_command({ "command": "cancel" }) is Ok(Cancel))
-  assert_true(
-    decode_serve_command({
-      "command": "queue",
-      "action": "add",
-      "id": "q1",
-      "text": "later",
-    })
-    is Ok(Queue(AddQueued(id="q1", text="later"))),
-  )
   assert_true(
     decode_serve_command({ "command": "approval", "id": "ap-1", "allow": true })
     is Ok(Approval(id="ap-1", allow=true)),
@@ -663,11 +638,6 @@ async fn run_serve(
   // event, so even a turn that raises leaves `session` reflecting all the
   // events it recorded before failing.
   let mut session = initial_session
-  // Queue-control events can arrive while the turn task is appending model
-  // events. One lock keeps both writers on the same latest snapshot, so the
-  // durable sequence remains contiguous and neither append can overwrite the
-  // other's in-memory `session` value.
-  let session_append_lock = @async.Mutex()
   // The desk outlives every turn: a question is asked by a tool inside one
   // turn's task and answered by the loop below, which is the process's single
   // command consumer. Both close over this one value.
@@ -777,11 +747,7 @@ async fn run_serve(
       }
       steps.try_put(Shutdown) |> ignore
     }
-    let queued_inputs = session.queued_inputs()
-    let pending : Array[PendingWork] = queued_inputs.map(item => {
-      PendingQueued(item.id)
-    })
-    let queue_promotions : Array[String] = []
+    let pending : Array[PendingWork] = []
     let mut active_work : ActiveWork? = None
     let mut shutting_down = false
     // Auto-continue bookkeeping. A set with "auto": true records a PENDING
@@ -839,8 +805,6 @@ async fn run_serve(
       item : @agent_session.SessionItem,
       what : String,
     ) -> Bool {
-      session_append_lock.acquire()
-      defer session_append_lock.release()
       session = if store is Some(store) {
         store.append(session, item) catch {
           error if @async.is_being_cancelled() ||
@@ -990,12 +954,9 @@ async fn run_serve(
           submission_id?,
           on_goal_met?,
           append_item=(current, item) => {
-            ignore(current)
-            session_append_lock.acquire()
-            defer session_append_lock.release()
             let next = match store {
-              Some(store) => store.append(session, item)
-              None => session.append(item)
+              Some(store) => store.append(current, item)
+              None => current.append(item)
             }
             session = next
             next
@@ -1052,30 +1013,6 @@ async fn run_serve(
         match pending.remove(0) {
           PendingPrompt(text, submission_id~) =>
             active_work = Some(ActiveTurn(start_turn(text, submission_id)))
-          PendingQueued(id) => {
-            if !queue_promotions.contains(id) {
-              pending.insert(0, PendingQueued(id))
-              return
-            }
-            let queued = queued_inputs.search_by(item => item.id == id)
-            if queued is Some(index) &&
-              append_idle_item(Queue(Promoted(id~)), "queue promotion") {
-              let item = queued_inputs[index]
-              for promotion_index, candidate in queue_promotions {
-                if candidate == id {
-                  ignore(queue_promotions.remove(promotion_index))
-                  break
-                }
-              }
-              for index, candidate in queued_inputs {
-                if candidate.id == id {
-                  ignore(queued_inputs.remove(index))
-                  break
-                }
-              }
-              active_work = Some(ActiveTurn(start_turn(item.content, Some(id))))
-            }
-          }
           PendingCompact =>
             active_work = Some(ActiveCompact(start_compaction(session)))
           // Instant work: append the goal at its ordered position and keep
@@ -1158,118 +1095,6 @@ async fn run_serve(
                 pending.push(PendingContext(Notice(text)))
               } else {
                 runtime.queue_steer(Notice(text))
-              }
-          }
-        Wire(Queue(action)) =>
-          match action {
-            AddQueued(id~, text~) =>
-              if text.is_blank() {
-                @emit.emit(CommandError(error="queued text must not be blank"))
-              } else if queued_inputs.iter().any(item => item.id == id) {
-                @emit.emit(
-                  CommandError(error="queued id already exists: \{id}"),
-                )
-              } else if active_work is Some(ActiveCompact(_)) {
-                @emit.emit(CommandError(error="queue requires a running turn"))
-              } else if append_idle_item(
-                  Queue(Added(id~, content=text)),
-                  "queued prompt",
-                ) {
-                queued_inputs.push({ id, content: text, })
-                pending.push(PendingQueued(id))
-                if active_work is None {
-                  start_next_pending()
-                }
-              }
-            EditQueued(id~, text~) => {
-              let mut found = false
-              for index, item in queued_inputs {
-                if item.id == id {
-                  found = true
-                  if text.is_blank() {
-                    @emit.emit(
-                      CommandError(error="queued text must not be blank"),
-                    )
-                  } else if append_idle_item(
-                      Queue(Edited(id~, content=text)),
-                      "queued prompt edit",
-                    ) {
-                    queued_inputs[index] = { id, content: text, }
-                  }
-                  break
-                }
-              }
-              if !found {
-                @emit.emit(CommandError(error="queued id not found: \{id}"))
-              }
-            }
-            WithdrawQueued(id~) => {
-              let mut found = false
-              for index, item in queued_inputs {
-                if item.id == id {
-                  found = true
-                  if append_idle_item(
-                      Queue(Withdrawn(id~)),
-                      "queued prompt withdrawal",
-                    ) {
-                    ignore(queued_inputs.remove(index))
-                    for pending_index, work in pending {
-                      if work is PendingQueued(pending_id) && pending_id == id {
-                        ignore(pending.remove(pending_index))
-                        break
-                      }
-                    }
-                  }
-                  break
-                }
-              }
-              if !found {
-                @emit.emit(CommandError(error="queued id not found: \{id}"))
-              }
-            }
-            SteerQueued(id~) => {
-              let mut found = false
-              for index, item in queued_inputs {
-                if item.id == id {
-                  found = true
-                  if !(active_work is Some(ActiveTurn(_))) {
-                    @emit.emit(
-                      CommandError(
-                        error="queued prompt can only steer a running turn",
-                      ),
-                    )
-                  } else if append_idle_item(
-                      Queue(Steered(id~)),
-                      "queued prompt steer",
-                    ) {
-                    runtime.queue_steer(Prompt(item.content))
-                    ignore(queued_inputs.remove(index))
-                    for pending_index, work in pending {
-                      if work is PendingQueued(pending_id) && pending_id == id {
-                        ignore(pending.remove(pending_index))
-                        break
-                      }
-                    }
-                  }
-                  break
-                }
-              }
-              if !found {
-                @emit.emit(CommandError(error="queued id not found: \{id}"))
-              }
-            }
-            PromoteQueued(id~) =>
-              if pending
-                .iter()
-                .any(work => work is PendingQueued(candidate) && candidate == id) {
-                if !queue_promotions.contains(id) {
-                  queue_promotions.push(id)
-                }
-                if active_work is None {
-                  start_next_pending()
-                }
-              } else {
-                @emit.emit(CommandError(error="queued id not found: \{id}"))
               }
           }
         Wire(Cancel) => {

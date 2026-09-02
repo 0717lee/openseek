@@ -458,9 +458,9 @@ pub fn steer_run(
 }
 
 ///|
-/// Submit one durable queue mutation to the currently running turn's serve
-/// engine. The session record, not this immediate write acknowledgement, is
-/// the authoritative result observed by clients.
+/// Mutate the currently running turn's in-memory follow-up queue. Queued text
+/// stays in the Desktop controller and reaches the serve process only when it
+/// is promoted to an ordinary prompt or explicitly steered into the open turn.
 pub fn queue_run(
   manager : EngineManager,
   payload : @protocol.QueuePayload,
@@ -474,7 +474,7 @@ pub fn queue_run(
   if payload.run_id is Some(expected) && run_id != expected {
     return { accepted: false, run_id: None, }
   }
-  let command = match payload.action {
+  match payload.action {
     "add" => {
       guard !(live.phase is Running(compact_queued=true, ..)) else {
         return { accepted: false, run_id: Some(run_id), }
@@ -482,40 +482,44 @@ pub fn queue_run(
       guard payload.text is Some(text) && !text.is_blank() else {
         return { accepted: false, run_id: Some(run_id), }
       }
-      @protocol.queue_add(id, text)
+      guard !live.queued_runs.iter().any(queued => queued.id == id) else {
+        return { accepted: false, run_id: Some(run_id), }
+      }
+      live.queued_runs.push({ id, run_id: mint_run_id(), content: text, })
     }
     "edit" => {
       guard payload.text is Some(text) && !text.is_blank() else {
         return { accepted: false, run_id: Some(run_id), }
       }
-      @protocol.queue_edit(id, text)
-    }
-    "withdraw" => @protocol.queue_withdraw(id)
-    "steer" => @protocol.queue_steer(id)
-    _ => return { accepted: false, run_id: Some(run_id), }
-  }
-  guard live.submit(
-    command,
-    failure_reason="failed to write queue command to the engine",
-  ) else {
-    return { accepted: false, run_id: Some(run_id), }
-  }
-  if payload.action == "steer" && payload.text is Some(text) && !text.is_blank() {
-    // The serve process reports the queued prompt through the ordinary
-    // steer_applied channel. Retain its queue id so every client can settle
-    // the exact Steering row instead of matching user text.
-    ignore(live.steer_runs.record_sent(text, Some(id)))
-  }
-  match payload.action {
-    "add" => live.queued_runs.push({ id, run_id: mint_run_id(), })
-    "withdraw" | "steer" =>
-      for index, queued in live.queued_runs {
-        if queued.id == id {
-          ignore(live.queued_runs.remove(index))
-          break
-        }
+      guard live.queued_runs.search_by(queued => queued.id == id) is Some(index) else {
+        return { accepted: false, run_id: Some(run_id), }
       }
-    "edit" | _ => ()
+      let queued = live.queued_runs[index]
+      live.queued_runs[index] = { ..queued, content: text, }
+    }
+    "withdraw" => {
+      guard live.queued_runs.search_by(queued => queued.id == id) is Some(index) else {
+        return { accepted: false, run_id: Some(run_id), }
+      }
+      ignore(live.queued_runs.remove(index))
+    }
+    "steer" => {
+      guard live.queued_runs.search_by(queued => queued.id == id) is Some(index) else {
+        return { accepted: false, run_id: Some(run_id), }
+      }
+      let queued = live.queued_runs[index]
+      guard live.submit(
+        @protocol.steer(queued.content),
+        failure_reason="failed to write steering to the engine",
+      ) else {
+        return { accepted: false, run_id: Some(run_id), }
+      }
+      // The ordinary steer receipt carries this queue id, keeping the
+      // transient Steering row attached to the exact promoted input.
+      ignore(live.steer_runs.record_sent(queued.content, Some(id)))
+      ignore(live.queued_runs.remove(index))
+    }
+    _ => return { accepted: false, run_id: Some(run_id), }
   }
   { accepted: true, run_id: Some(run_id), }
 }
@@ -771,7 +775,6 @@ async fn follower_snapshot(
     match request_follower_load(follower) {
       LoadOk(document) => return Some(document)
       LoadStopped => continue
-      LoadAbsent(detail) => raise EngineError("session load failed: " + detail)
       LoadFailed(detail) => raise EngineError("session load failed: " + detail)
     }
   }

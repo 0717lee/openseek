@@ -125,23 +125,23 @@ fn Model::composer_input(self : Model) -> @composer.Input {
     if steering.iter().any(input => input.submission_id == item.id) {
       continue
     }
+    let queueing = conv.pending_steers
+      .iter()
+      .any(input => {
+        input.behavior is FollowupQueue && input.submission_id == item.id
+      })
     queued_items.push({
       id: item.id,
       content: user_display_text(item.content),
-      state: @composer.Queued(
-        editing=conv.queue_edit_id == Some(item.id),
-        interactive~,
-      ),
+      state: if queueing {
+        @composer.Queueing
+      } else {
+        @composer.Queued(
+          editing=conv.queue_edit_id == Some(item.id),
+          interactive~,
+        )
+      },
     })
-  }
-  for item in conv.pending_steers {
-    if item.behavior is FollowupQueue {
-      queued_items.push({
-        id: item.submission_id,
-        content: user_display_text(item.content),
-        state: @composer.Queueing,
-      })
-    }
   }
   if !queued_items.is_empty() {
     context.push(@composer.QueuedInputPanel(items=queued_items))

@@ -25,31 +25,6 @@ pub fn steer(text : String) -> @wire.Command {
 }
 
 ///|
-pub fn queue_add(id : String, text : String) -> @wire.Command {
-  QueueAdd(id~, text~)
-}
-
-///|
-pub fn queue_edit(id : String, text : String) -> @wire.Command {
-  QueueEdit(id~, text~)
-}
-
-///|
-pub fn queue_withdraw(id : String) -> @wire.Command {
-  QueueWithdraw(id~)
-}
-
-///|
-pub fn queue_steer(id : String) -> @wire.Command {
-  QueueSteer(id~)
-}
-
-///|
-pub fn queue_promote(id : String) -> @wire.Command {
-  QueuePromote(id~)
-}
-
-///|
 /// Ask the idle engine to compact the durable record.
 pub fn compact() -> @wire.Command {
   Compact
@@ -115,28 +90,6 @@ test "the host's commands are the protocol's" {
       ..
     },
   )
-  assert_eq(queue_add("q1", "later").to_json(), {
-    "command": "queue",
-    "action": "add",
-    "id": "q1",
-    "text": "later",
-  })
-  assert_eq(queue_edit("q1", "revised").to_json(), {
-    "command": "queue",
-    "action": "edit",
-    "id": "q1",
-    "text": "revised",
-  })
-  assert_eq(queue_withdraw("q1").to_json(), {
-    "command": "queue",
-    "action": "withdraw",
-    "id": "q1",
-  })
-  assert_eq(queue_steer("q1").to_json(), {
-    "command": "queue",
-    "action": "steer",
-    "id": "q1",
-  })
   assert_true(compact().to_json() is { "command": String("compact"), .. })
   assert_true(cancel().to_json() is { "command": String("cancel"), .. })
   // A manual set omits `auto` on the wire entirely; arming spells it out.

@@ -74,8 +74,9 @@ pub(all) struct SteerPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// One mutation of the durable follow-up queue. `text` is required by add and
-/// edit and absent for withdraw and steer.
+/// One mutation of the live follow-up queue. `text` is required by add and
+/// edit and absent for withdraw and steer. The queue belongs to the Desktop
+/// engine process and is never written to the session record.
 pub(all) struct QueuePayload {
   action : String
   id : String

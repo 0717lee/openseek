@@ -20,16 +20,6 @@ pub fn goal_set(String, auto~ : Bool) -> @openseek_protocol.Command
 
 pub fn prompt(String, submission_id? : String) -> @openseek_protocol.Command
 
-pub fn queue_add(String, String) -> @openseek_protocol.Command
-
-pub fn queue_edit(String, String) -> @openseek_protocol.Command
-
-pub fn queue_promote(String) -> @openseek_protocol.Command
-
-pub fn queue_steer(String) -> @openseek_protocol.Command
-
-pub fn queue_withdraw(String) -> @openseek_protocol.Command
-
 pub fn steer(String) -> @openseek_protocol.Command
 
 // Errors
@@ -1921,7 +1911,6 @@ pub(all) enum SessionItem {
   Assistant(SessionAssistantMessage)
   ToolResult(SessionToolResult)
   RuntimeNotice(SessionRuntimeNotice)
-  Queue(SessionQueueEvent)
   Summary(SessionSummary)
   Terminal(SessionTerminal)
   UnknownTerminal(Json)
@@ -1958,21 +1947,6 @@ pub fn SessionPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonD
 pub fn SessionPayload::not_equal(Self, Self) -> Bool
 pub fn SessionPayload::to_json(Self) -> Json
 pub fn SessionPayload::to_repr(Self) -> @debug.Repr
-
-pub(all) enum SessionQueueEvent {
-  Added(id~ : String, content~ : String)
-  Edited(id~ : String, content~ : String)
-  Withdrawn(id~ : String)
-  Steered(id~ : String)
-  Promoted(id~ : String)
-} derive(Eq, @debug.Debug)
-pub fn SessionQueueEvent::equal(Self, Self) -> Bool
-pub fn SessionQueueEvent::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
-pub fn SessionQueueEvent::not_equal(Self, Self) -> Bool
-pub fn SessionQueueEvent::to_json(Self) -> Json
-pub fn SessionQueueEvent::to_repr(Self) -> @debug.Repr
-pub impl ToJson for SessionQueueEvent
-pub impl @json.FromJson for SessionQueueEvent
 
 pub(all) struct SessionRuntimeNotice {
   content : String

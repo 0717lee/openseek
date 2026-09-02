@@ -70,6 +70,7 @@ priv struct ServeEngine {
 priv struct QueuedRun {
   id : String
   run_id : String
+  content : String
 }
 
 ///|
@@ -229,15 +230,8 @@ fn ends_with_turn(command : @wire.Command) -> Bool {
   // decision nobody is waiting for — so this dies with the turn like a steer,
   // rather than being delivered into a turn that never asked.
   match command {
-    Cancel | Steer(..) | QueueSteer(..) | ApprovalDecision(..) => true
-    Prompt(..)
-    | QueueAdd(..)
-    | QueueEdit(..)
-    | QueueWithdraw(..)
-    | Compact
-    | QueuePromote(..)
-    | GoalSet(..)
-    | GoalClear => false
+    Cancel | Steer(..) | ApprovalDecision(..) => true
+    Prompt(..) | Compact | GoalSet(..) | GoalClear => false
   }
 }
 
@@ -1473,19 +1467,6 @@ async fn[G] start_serve_engine(
   // there is no process to leak and no new writer can overlap the old root.
   let startup_follower = ensure_follower(sink~, group~, manager~, config~)
   let engine_follower = manager.followers.get(config.session)
-  let recovered_queue : Array[QueuedRun] = match engine_follower {
-    Some(follower) =>
-      match request_follower_load(follower) {
-        LoadOk(document) => queued_runs_from_document(document)
-        // On a new conversation the follower deliberately starts before the
-        // child creates its first durable record, so there is no queue yet.
-        LoadAbsent(_) => []
-        LoadFailed(detail) =>
-          raise EngineError("failed to restore queued messages: " + detail)
-        LoadStopped => []
-      }
-    None => []
-  }
   let mut startup_engine : ServeEngine? = None
   let mut startup_committed = false
   // Everything through scheduling both stream tasks is one initialization
@@ -1589,7 +1570,7 @@ async fn[G] start_serve_engine(
     pending_failure: None,
     condemned: false,
     steer_runs: SteerRunTracker(),
-    queued_runs: recovered_queue,
+    queued_runs: [],
   }
   startup_engine = Some(engine)
   // Spawned before the handle is reachable from any request, so stdin has an
@@ -1612,52 +1593,7 @@ async fn[G] start_serve_engine(
       engine.run(manager, reader, stderr_task)
     }),
   )
-  if !engine.queued_runs.is_empty() {
-    let next = engine.queued_runs[0]
-    guard engine.submit(
-      @protocol.queue_promote(next.id),
-      failure_reason="failed to resume queued prompt",
-    ) else {
-      raise EngineError("engine changed before queued prompt resumed")
-    }
-    ignore(engine.queued_runs.remove(0))
-    engine.phase = Running(run_id=next.run_id, compact_queued=false)
-    engine.steer_runs.begin_run()
-    emit(
-      sink,
-      Started({
-        run_id: next.run_id,
-        submission_id: Some(next.id),
-        engine: Some(engine.engine_name),
-        model: Some(engine.model),
-        max_steps: Some(engine.max_steps),
-        session: engine.session_key,
-        session_root: engine.session_root.map(root => root.resource_path()),
-      }),
-    )
-  }
   startup_committed = true
-}
-
-///|
-fn queued_runs_from_document(
-  document : @protocol.SessionDocument,
-) -> Array[QueuedRun] raise EngineError {
-  let ids : Array[String] = []
-  for event in document.events.unwrap_or([]) {
-    match event.item {
-      Queue(Added(id~, ..)) => if !ids.contains(id) { ids.push(id) }
-      Queue(Withdrawn(id~)) | Queue(Steered(id~)) | Queue(Promoted(id~)) =>
-        for index, candidate in ids {
-          if candidate == id {
-            ignore(ids.remove(index))
-            break
-          }
-        }
-      Queue(Edited(..)) | _ => ()
-    }
-  }
-  ids.map(id => { id, run_id: mint_run_id(), })
 }
 
 ///|
@@ -1916,7 +1852,7 @@ async fn ServeEngine::consume(
               )
               if next_queue is Some(next) &&
                 engine.submit(
-                  @protocol.queue_promote(next.id),
+                  @protocol.prompt(next.content, submission_id=next.id),
                   failure_reason="failed to promote queued prompt",
                 ) {
                 ignore(engine.queued_runs.remove(0))

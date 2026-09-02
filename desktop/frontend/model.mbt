@@ -849,14 +849,14 @@ priv struct Conversation {
   // Everything belonging to the turn in flight; see `RunState`.
   turn : RunState
   // Follow-ups submitted into an open run and not yet acknowledged. Queue
-  // additions leave when their durable Added event arrives; steers leave on
-  // their exact id-bearing receipt, or with the run they belong to. Canonical
-  // User text never claims ownership, so identical steers from multiple
-  // clients cannot collide.
+  // additions leave when the Desktop host accepts the in-memory mutation;
+  // steers leave on their exact id-bearing receipt, or with the run they
+  // belong to. Canonical User text never claims ownership, so identical
+  // steers from multiple clients cannot collide.
   pending_steers : Array[PendingSteer]
-  // Durable prompts waiting to become later turns. Unlike `pending_steers`,
-  // this is reconstructed exclusively from session queue events.
-  queued_inputs : Array[@transcript.QueuedInput]
+  // Prompts waiting in the Desktop engine process to become later turns.
+  // They are transient controller state and never part of the transcript.
+  queued_inputs : Array[QueuedInput]
   // The queued prompt currently loaded into the main composer for editing.
   queue_edit_id : String?
   // The permission question this conversation's engine is blocked on, if any.
@@ -1004,11 +1004,10 @@ fn GoalRequest::settled_by(
 
 ///|
 /// One follow-up submitted into an open run. A queued follow-up waits for its
-/// durable Added event; a steer waits for its id-bearing receipt. The globally
-/// unique `submission_id` is the only ownership proof: canonical transcript
-/// text and legacy receipts without an id never settle this entry. The
-/// original draft shape is retained so a definitive refusal can restore it to
-/// the composer without exposing the serialized mention envelope.
+/// host reply; a steer waits for its id-bearing receipt. The globally unique
+/// `submission_id` is the only ownership proof. The original draft shape is
+/// retained so a definitive refusal can restore it to the composer without
+/// exposing the serialized mention envelope.
 priv struct PendingSteer {
   submission_id : String
   // The run this steer was sent into. A receipt names it too, which is what
@@ -1021,6 +1020,13 @@ priv struct PendingSteer {
   // it is in flight, so presentation cannot be derived from the current
   // global default.
   behavior : FollowupBehavior
+} derive(Eq)
+
+///|
+/// One prompt waiting in the Desktop engine's in-memory follow-up queue.
+priv struct QueuedInput {
+  id : String
+  content : String
 } derive(Eq)
 
 ///|
@@ -2076,6 +2082,13 @@ priv enum DeviceMsg {
   // this client did not send it and must not put another client's text in
   // this composer.
   SteerRejected(session~ : String, submission_id~ : String, run_id~ : String)
+  QueueAccepted(
+    session~ : String,
+    action~ : String,
+    id~ : String,
+    text~ : String?,
+    run_id~ : String
+  )
   QueueAddRejected(session~ : String, submission_id~ : String, run_id~ : String)
   QueueSteerRejected(
     session~ : String,
@@ -2111,11 +2124,6 @@ priv enum DeviceMsg {
     watermark~ : Int,
     goal~ : @transcript.GoalStanding?,
     goal_markers~ : Array[(Int, @transcript.GoalMarker)],
-    generation~ : Int
-  )
-  SessionQueueSnapshot(
-    session~ : String,
-    queued_inputs~ : Array[@transcript.QueuedInput],
     generation~ : Int
   )
   // A foreground stored-session read failed. Generation guards stale replies;
@@ -3647,7 +3655,40 @@ fn Conversation::enqueue_steer(
     mentions: mentions.copy(),
     behavior,
   })
-  { ..self, pending_steers, }
+  let queued_inputs = if behavior is FollowupQueue {
+    let queued_inputs = self.queued_inputs.copy()
+    queued_inputs.push({ id: submission_id, content, })
+    queued_inputs
+  } else {
+    self.queued_inputs
+  }
+  { ..self, pending_steers, queued_inputs, }
+}
+
+///|
+fn Conversation::remove_queued_input(
+  self : Conversation,
+  id : String,
+) -> (Conversation, Bool) {
+  for index, item in self.queued_inputs {
+    if item.id == id {
+      let queued_inputs = self.queued_inputs.copy()
+      ignore(queued_inputs.remove(index))
+      return (
+        {
+          ..self,
+          queued_inputs,
+          queue_edit_id: if self.queue_edit_id == Some(id) {
+            None
+          } else {
+            self.queue_edit_id
+          },
+        },
+        true,
+      )
+    }
+  }
+  (self, false)
 }
 
 ///|
@@ -3851,15 +3892,10 @@ fn Conversation::settle_pending_prompt(
 }
 
 ///|
-/// Forget every submission still waiting for a receipt.
-///
-/// A submitted input is sent once. The composer keeps its entry only until
-/// the host answers, and a boundary that makes the answer unobtainable — a
-/// reconnect, a run ending without the commit — ends the entry rather than
-/// converting it into a guess about the record. The record is authoritative
-/// and the client can read it; a notice that says "delivery could not be
-/// confirmed" adds nothing the transcript does not already show, and cannot
-/// be retracted correctly when it is wrong.
+/// Forget submissions whose transient acknowledgement cannot cross a
+/// reconnect. Optimistic queue rows remain visible: the Desktop engine may
+/// already hold them, and a later action or promoted Started boundary settles
+/// their actual state without putting uncommitted text in the transcript.
 fn Conversation::forget_awaiting_inputs(self : Conversation) -> Conversation {
   if self.pending_steers.is_empty() && self.pending_prompt is None {
     return self
@@ -3869,14 +3905,17 @@ fn Conversation::forget_awaiting_inputs(self : Conversation) -> Conversation {
 }
 
 ///|
-/// Forget every submission this exact run owned, whatever it was waiting for.
-/// See `forget_awaiting_inputs` for why nothing is retained.
+/// Forget receipt-driven steers owned by this exact run. Queue-add requests
+/// keep waiting for their direct host reply: unlike a steer receipt, that
+/// reply can still arrive after the run's terminal event.
 fn Conversation::forget_steers_for_run(
   self : Conversation,
   run_id : String,
 ) -> Conversation {
   let pending_steers = self.pending_steers.filter(input => {
-    !(input.run_id is Some(owner) && owner == run_id)
+    !(input.behavior is FollowupSteer &&
+    input.run_id is Some(owner) &&
+    owner == run_id)
   })
   if pending_steers.length() == self.pending_steers.length() {
     return self
@@ -3910,34 +3949,10 @@ fn Conversation::apply_commit(
   } else {
     self.goal
   }
-  let queued_inputs = self.queued_inputs.copy()
-  if item is @protocol.Queue(event) {
-    @transcript.apply_queue_event(queued_inputs, event)
-  }
-  let pending_steers = if item is @protocol.Queue(@protocol.Added(id~, ..)) {
-    self.pending_steers.filter(input => input.submission_id != id)
-  } else {
-    self.pending_steers
-  }
-  let queue_edit_id = if item
-    is @protocol.Queue(
-      @protocol.Edited(id~, ..)
-      | @protocol.Withdrawn(id~)
-      | @protocol.Steered(id~)
-      | @protocol.Promoted(id~)
-    ) &&
-    self.queue_edit_id == Some(id) {
-    None
-  } else {
-    self.queue_edit_id
-  }
   let conv = {
     ..self,
     messages,
     goal,
-    queued_inputs,
-    pending_steers,
-    queue_edit_id,
     // Settled by what this commit made the record say, not by whose command
     // it was — see `GoalRequest::settled_by`.
     goal_pending: if self.goal_pending is Some(pending) &&
