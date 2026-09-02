@@ -1359,6 +1359,10 @@ priv struct Model {
   // close path — from a browser tab, `window.close()` exits nothing, and the
   // update would yank the app out from under whoever is at the machine.
   is_desktop : Bool
+  // Whether the native window is currently focused. Conversation navigation
+  // has its own `focused` channel; both facts, together with `screen`, decide
+  // whether a completed turn was actually visible to the reader.
+  window_focused : Bool
   // Installed package version supplied by the native host's `app.info` op.
   app_version : String
   // A browser page's account layer: the relay session and the device
@@ -1765,6 +1769,9 @@ priv enum Msg {
   FontSizeChanged(String)
   // The window was resized; `width` decides the narrow (phone) layout.
   ViewportResized(width~ : Int)
+  // The native window gained or lost OS focus. This is deliberately distinct
+  // from the selected device channel stored in `Model.focused`.
+  WindowFocusChanged(Bool)
   SaveApiKey
   OpenSkills
   // Everything the Skills page does with itself once it is open.
@@ -2470,6 +2477,7 @@ fn initial_model() -> Model {
     deferred_host_settings: None,
     legacy_cleanup_pending: false,
     is_desktop,
+    window_focused: !is_desktop || @interop.page_has_focus(),
     app_version: "development",
     // Every browser page is the console: it signs in against the relay and
     // verifies its required query-selected device before that channel opens.
@@ -3295,6 +3303,50 @@ fn Model::conversation_by_pending_steer(
 }
 
 ///|
+/// Whether this conversation is the transcript the reader can currently see.
+/// Keeping this predicate separate from the unread bit makes window focus a
+/// read-state input, not a second encoding of read state.
+fn Model::conversation_is_visible(
+  self : Model,
+  channel : @interop.ChannelId,
+  session_id : String,
+) -> Bool {
+  self.window_focused &&
+  self.screen is Chat &&
+  channel == self.focused &&
+  session_id == self.active_session
+}
+
+///|
+/// Mark one conversation's completed turn as read. Badge synchronization is
+/// derived from the resulting model transition by `update`.
+fn Model::mark_conversation_read(
+  self : Model,
+  channel : @interop.ChannelId,
+  session_id : String,
+) -> Model {
+  let conversations = self.conversations.map(conv => {
+    if conv.device == channel && conv.session_id == session_id {
+      { ..conv, unseen_finish: false, }
+    } else {
+      conv
+    }
+  })
+  { ..self, conversations, }
+}
+
+///|
+/// A foreground chat reads the currently selected conversation through its
+/// latest completion. Other screens retain the unread state until the reader
+/// returns to the transcript.
+fn Model::mark_visible_conversation_read(self : Model) -> Model {
+  guard self.conversation_is_visible(self.focused, self.active_session) else {
+    return self
+  }
+  self.mark_conversation_read(self.focused, self.active_session)
+}
+
+///|
 /// Make `session_id` the on-screen conversation, creating its entry in
 /// `project` when it has none, and drop conversations with nothing worth
 /// keeping. Exact input ownership is retained even after lifecycle recovery
@@ -3316,8 +3368,7 @@ fn Model::activate(
   for conv in self.conversations {
     if conv.device == channel && conv.session_id == session_id {
       found = true
-      // Opening the conversation is what "seen" means.
-      conversations.push({ ..conv, unseen_finish: false, })
+      conversations.push(conv)
     } else if conv.worth_keeping() {
       conversations.push(conv)
     }
@@ -3336,7 +3387,20 @@ fn Model::activate(
   }
   // Activating a conversation is also what moves the UI's focus to its
   // device — a no-op while the app runs a single channel.
-  { ..self, focused: channel, active_session: session_id, conversations, }
+  let activated = {
+    ..self,
+    focused: channel,
+    active_session: session_id,
+    conversations,
+  }
+  // `activate` is the explicit navigation path into this transcript. A
+  // background programmatic activation does not claim that the reader saw it;
+  // the later window-focus event will mark it read once it is visible.
+  if self.window_focused {
+    activated.mark_conversation_read(channel, session_id)
+  } else {
+    activated
+  }
 }
 
 ///|

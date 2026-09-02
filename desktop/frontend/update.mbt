@@ -98,7 +98,7 @@ fn open_session_on(
 ) -> (@cmd.Cmd, Model) {
   let owner : @interop.ConversationKey = { channel, session: session_id, }
   if session_id == model.active_session {
-    let base = { ..model, screen: Chat, }
+    let base = { ..model, screen: Chat, }.mark_visible_conversation_read()
     // Re-selecting is an explicit catch-up point for writes made by an
     // idle CLI or another client. It also restarts an exhausted retry
     // round; an existing request stays single-flight. A fresh chat has no
@@ -3231,6 +3231,13 @@ fn update_msg(
     }
     ToggleSidebar =>
       (@cmd.none, { ..model, sidebar_open: !model.sidebar_open, })
+    WindowFocusChanged(focused) => {
+      // Returning to a visible transcript marks its completed turn read.
+      // Permission questions remain actionable until answered and therefore
+      // continue to contribute to the independently derived badge count.
+      let model = { ..model, window_focused: focused, }
+      (@cmd.none, model.mark_visible_conversation_read())
+    }
     ViewportResized(width~) => {
       let narrow = width <= NarrowBreakpoint
       // The embedded viewer only learns its host's size through layout(),
@@ -7394,10 +7401,12 @@ fn update_device_msg(
           ..settled_inputs,
           run: NoRun(ended=Some(RunFinished(RunOutcome::parse(status)))),
           last_run_id: Some(run_id),
-          // A finish the user watched happen needs no reminder; one landing
-          // in a background conversation leaves a dot until they visit.
-          unseen_finish: conv.device != model.focused ||
-          conv.session_id != model.active_session,
+          // A finish the user watched happen needs no reminder. Every other
+          // completion is unread until its transcript is actually visible.
+          unseen_finish: !model.conversation_is_visible(
+            conv.device,
+            conv.session_id,
+          ),
         }
         // The finished run just appended to the durable store, so the
         // sidebar list (and this conversation's title) may have changed —
@@ -8609,6 +8618,44 @@ test "a finish the user watched leaves no unseen dot" {
     running_model(),
   )
   inspect(next.active().unseen_finish, content="false")
+}
+
+///|
+test "a finish in an unfocused window still needs attention" {
+  let dispatch = test_dispatch()
+  let model = { ..running_model(), window_focused: false, }
+  let (_, next) = update_dev(
+    dispatch,
+    Finished(run_id="r7", status="finished", answer=Some("done")),
+    model,
+  )
+  inspect(next.active().unseen_finish, content="true")
+  inspect(next.notification_badge_count(), content="1")
+  let (_, focused) = update(dispatch, WindowFocusChanged(true), next)
+  inspect(focused.active().unseen_finish, content="false")
+  inspect(focused.notification_badge_count(), content="0")
+}
+
+///|
+test "a finish behind settings stays unread until the chat is reopened" {
+  let dispatch = test_dispatch()
+  let model = { ..running_model(), screen: Settings, }
+  let (_, next) = update_dev(
+    dispatch,
+    Finished(run_id="r7", status="finished", answer=Some("done")),
+    model,
+  )
+  inspect(next.active().unseen_finish, content="true")
+  inspect(next.notification_badge_count(), content="1")
+  let (_, opened) = open_session_on(
+    dispatch,
+    @interop.ChannelId::Local,
+    next,
+    "desktop-test",
+  )
+  assert_true(opened.screen is Chat)
+  inspect(opened.active().unseen_finish, content="false")
+  inspect(opened.notification_badge_count(), content="0")
 }
 
 ///|

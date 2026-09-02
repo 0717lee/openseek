@@ -414,6 +414,11 @@ pub fn boot() -> Unit {
           )
         }
         if model.is_desktop {
+          subs.push(
+            window_focus_subscription(
+              emit.map(focused => WindowFocusChanged(focused)),
+            ),
+          )
           // Only overlay titlebars turn the page's top chrome into native
           // window chrome; Linux keeps its separate system titlebar.
           if window_titlebar_overlay_supported() {
