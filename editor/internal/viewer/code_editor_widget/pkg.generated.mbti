@@ -286,6 +286,7 @@ pub fn CodeEditorWidget::set_selection(Self, @core.Selection, source? : String) 
 pub fn CodeEditorWidget::set_selections(Self, Array[@core.Selection], source? : String, reason? : @editor_api.CursorChangeReason) -> Unit
 pub fn CodeEditorWidget::set_value(Self, String) -> Unit
 pub fn CodeEditorWidget::show_references(Self, @common.Position, Array[@language.Location]) -> Unit
+pub fn CodeEditorWidget::update_host_options(Self, CodeEditorOptions) -> Unit
 pub fn CodeEditorWidget::update_options(Self, CodeEditorOptions) -> Unit
 
 type EditorDecorationsCollection

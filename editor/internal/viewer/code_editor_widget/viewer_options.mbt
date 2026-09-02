@@ -265,8 +265,8 @@ pub fn CodeEditorOptions::with_soft_wrap(
 }
 
 ///|
-/// Returns a copy with Monaco's folding option changed. Diff panes use this
-/// to keep their shared line-decoration lane free of folding controls.
+/// Returns a copy with Monaco's folding option changed. The option also
+/// controls the line-decoration space reserved for folding affordances.
 pub fn CodeEditorOptions::with_folding(
   self : CodeEditorOptions,
   folding : Bool,

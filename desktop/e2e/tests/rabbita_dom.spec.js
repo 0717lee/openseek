@@ -102,13 +102,86 @@ test('Review loads changed files and preserves its interactive diff workflow', a
     'true',
   );
 
+  const layout = page.getByRole('group', { name: 'Diff layout' });
+  await layout.getByRole('button', { name: 'Unified diff layout' }).click();
+  await expect(layout.getByRole('button', { name: 'Unified diff layout' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  const semantic = page.locator(
+    '.semantic-review[data-mode="tree"][data-layout="unified"]',
+  );
+  await expect(semantic).toBeVisible();
+  const semanticDiffCandidate = semantic.locator('.semantic-diff-editor-host').filter({
+    has: page.locator(
+      '.moonbit-diff-editor-modified '
+        + '.view-lines[data-view-part="view-lines"] > .view-line',
+      { hasText: 'working tree' },
+    ),
+  }).first();
+  await expect(semanticDiffCandidate).toBeVisible();
+  const semanticDiffId = await semanticDiffCandidate.getAttribute('id');
+  expect(semanticDiffId).not.toBeNull();
+  const semanticDiff = semantic.locator(`[id=${JSON.stringify(semanticDiffId)}]`);
+  const semanticOriginal = semanticDiff.locator('.moonbit-diff-editor-original');
+  const semanticModified = semanticDiff.locator('.moonbit-diff-editor-modified');
+  await expect(semanticDiff).toBeVisible();
+  await expect(semanticDiff.locator('.moonbit-diff-editor').first())
+    .toHaveAttribute('data-render-mode', 'inline');
+  await expect(semanticOriginal.locator('.line-numbers:visible').first())
+    .toBeVisible();
+  await expect.poll(() => semanticOriginal.evaluate((node) => {
+    const host = node.getBoundingClientRect();
+    const margin = node.querySelector('.margin');
+    const lineNumber = Array.from(node.querySelectorAll('.line-numbers'))
+      .map((element) => element.getBoundingClientRect())
+      .find((rect) => rect.width > 0);
+    if (!margin || !lineNumber) return null;
+    const marginRect = margin.getBoundingClientRect();
+    return {
+      lineNumberAligned:
+        Math.abs(host.width - (lineNumber.right - host.left)) <= 0.5,
+      decorationsClipped: host.width < marginRect.width,
+    };
+  })).toEqual({ lineNumberAligned: true, decorationsClipped: true });
+
+  const feedbackLine = semanticModified.locator(
+    '.view-lines[data-view-part="view-lines"] > .view-line',
+  ).filter({ hasText: 'working tree' }).first();
+  await expect(feedbackLine).toBeVisible();
+  const feedbackLineBox = await feedbackLine.boundingBox();
+  const modifiedBox = await semanticModified.boundingBox();
+  expect(feedbackLineBox).not.toBeNull();
+  expect(modifiedBox).not.toBeNull();
+  await page.mouse.move(
+    Math.min(
+      feedbackLineBox.x + 20,
+      modifiedBox.x + modifiedBox.width - 10,
+    ),
+    feedbackLineBox.y + feedbackLineBox.height / 2,
+  );
+  const feedbackGlyph = semanticModified.locator(
+    '.agent-feedback-glyph.line-hover',
+  );
+  await expect(feedbackGlyph).toBeVisible();
+  const feedbackGlyphBox = await feedbackGlyph.boundingBox();
+  expect(feedbackGlyphBox).not.toBeNull();
+  await page.mouse.click(
+    feedbackGlyphBox.x + feedbackGlyphBox.width / 2,
+    feedbackGlyphBox.y + feedbackGlyphBox.height / 2,
+  );
+  const feedbackInput = semanticDiff.locator(
+    '.agent-feedback-input-widget textarea',
+  );
+  await expect(feedbackInput).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(feedbackInput).toBeHidden();
+
   await reviewToolbar.getByRole('button', { name: 'Line diff' }).click();
   await expect(reviewToolbar.getByRole('button', { name: 'Line diff' })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
-  const layout = page.getByRole('group', { name: 'Diff layout' });
-  await layout.getByRole('button', { name: 'Unified diff layout' }).click();
   await expect(layout.getByRole('button', { name: 'Unified diff layout' })).toHaveAttribute(
     'aria-pressed',
     'true',

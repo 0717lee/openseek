@@ -44,9 +44,13 @@ fn DiffEditorEditors::create(
       (services, Some(services))
     }
   }
+  // `diff_pane()` excludes the folding contribution, so retaining the host's
+  // folding option cannot make source folds interactive here. It does retain
+  // the ordinary editor's 16px decorations reserve, which the Markdown fold
+  // toggle and agent-feedback affordance share.
   let pane_options = (match diff_word_wrap {
-    Inherit => editor_options.with_folding(false)
-    Off => editor_options.with_soft_wrap(false).with_folding(false)
+    Inherit => editor_options
+    Off => editor_options.with_soft_wrap(false)
   }).with_handle_mouse_wheel(handle_mouse_wheel)
   let editors : DiffEditorEditors = {
     original: @code_widget.CodeEditorWidget::create(
@@ -174,8 +178,8 @@ fn DiffEditorEditors::update_options(
     return
   }
   let pane_options = (match diff_word_wrap {
-    Inherit => editor_options.with_folding(false)
-    Off => editor_options.with_soft_wrap(false).with_folding(false)
+    Inherit => editor_options
+    Off => editor_options.with_soft_wrap(false)
   }).with_handle_mouse_wheel(handle_mouse_wheel)
   // Pinned DiffEditorEditors always updates both kernels. Inline's clipped
   // original must never wrap: deleted text wraps with the modified editor and
@@ -185,8 +189,8 @@ fn DiffEditorEditors::update_options(
   } else {
     pane_options
   }
-  self.original.update_options(original_options)
-  self.modified.update_options(pane_options)
+  self.original.update_host_options(original_options)
+  self.modified.update_host_options(pane_options)
 }
 
 ///|

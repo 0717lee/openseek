@@ -21,7 +21,7 @@ pub fn Viewer::get_value(self : Viewer) -> String {
 ///|
 pub fn Viewer::update_options(self : Viewer, options : ViewerOptions) -> Unit {
   self.options = options
-  self.widget.update_options(options.code_options())
+  self.widget.update_host_options(options.code_options())
 }
 
 ///|

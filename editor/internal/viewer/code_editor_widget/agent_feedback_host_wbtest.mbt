@@ -87,6 +87,24 @@ test "feedback lane reserves 18px while enabled and restores the base" {
 }
 
 ///|
+test "host option updates rebase an active feedback lane" {
+  with_feedback_test_viewer("alpha", (viewer, service) => {
+    service.set_feedback_enabled(test_model_uri(), true)
+    assert_eq(viewer.get_options().line_decorations_width, 28)
+
+    viewer.update_host_options(CodeEditorOptions(line_decorations_width=14))
+    assert_eq(viewer.get_options().line_decorations_width, 32)
+    assert_eq(
+      viewer.test_feedback_input_contribution().lane_base_width,
+      Some(14),
+    )
+
+    service.set_feedback_enabled(test_model_uri(), false)
+    assert_eq(viewer.get_options().line_decorations_width, 14)
+  })
+}
+
+///|
 test "hover glyph follows non-empty lines of an enabled resource" {
   with_feedback_test_viewer("alpha\n   \ngamma", (viewer, service) => {
     // Disabled resource: no glyph.

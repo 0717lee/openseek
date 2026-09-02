@@ -158,7 +158,9 @@ fn run_diff_markdown_comments_test() -> Unit {
     foldable=true,
   )
   |> ignore
+  let feedback = @feedback_contrib.AgentFeedbackService()
   let services = @viewer.ViewerServices(
+    agent_feedback=feedback.agent_feedback_handle(),
     languages=languages.language_handle(log_service.log_handle()),
     log_service=log_service.log_handle(),
   )
@@ -251,6 +253,10 @@ fn run_diff_markdown_comments_test() -> Unit {
       host.set_attribute("style", "width:\{width}px;height:640px;")
       diff_editor.layout()
     },
+    enabled => {
+      feedback.set_feedback_enabled(unchanged_original.uri, enabled)
+      feedback.set_feedback_enabled(unchanged_modified.uri, enabled)
+    },
     () => {
       auto_height_enabled.val = true
       apply_content_height(diff_editor.get_content_height())
@@ -265,15 +271,17 @@ extern "js" fn install_diff_markdown_comments_controls(
   set_fixture : (String) -> Unit,
   set_layout : (String) -> Unit,
   resize : (Int) -> Unit,
+  set_feedback_enabled : (Bool) -> Unit,
   enable_auto_height : () -> Unit,
   content_height_event_count : () -> Int,
   content_height : () -> Double,
 ) -> Unit =
-  #| (setFixture, setLayout, resize, enableAutoHeight, contentHeightEventCount, contentHeight) => {
+  #| (setFixture, setLayout, resize, setFeedbackEnabled, enableAutoHeight, contentHeightEventCount, contentHeight) => {
   #|   globalThis.__diffMarkdownCommentsControls = Object.freeze({
   #|     set_fixture: setFixture,
   #|     set_layout: setLayout,
   #|     resize,
+  #|     set_feedback_enabled: setFeedbackEnabled,
   #|     enable_auto_height: enableAutoHeight,
   #|     content_height_event_count: contentHeightEventCount,
   #|     content_height: contentHeight,
