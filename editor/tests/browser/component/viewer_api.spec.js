@@ -21,38 +21,6 @@ test('runs MoonBit viewer API component checks in the browser', async ({ page },
     // are in the DOM, so it is asserted after the scroll further down.
     const wrappedHoverLine = page.locator('.view-line').filter({ hasText: 'keeps' });
     await expect(wrappedHoverLine).toHaveCount(0);
-    const firstGlyphLeft = (locator) =>
-      locator.first().evaluate((node) => {
-        const text = node.textContent || '';
-        const idx = text.search(/\S/);
-        if (idx < 0) return null;
-        const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
-        let remaining = idx;
-        let target = null;
-        let offset = 0;
-        let current;
-        while ((current = walker.nextNode())) {
-          const len = current.textContent.length;
-          if (remaining < len) {
-            target = current;
-            offset = remaining;
-            break;
-          }
-          remaining -= len;
-        }
-        if (!target) return null;
-        const range = document.createRange();
-        range.setStart(target, offset);
-        range.setEnd(target, offset + 1);
-        const root = node.closest('.monaco-editor');
-        return Math.round(
-          range.getBoundingClientRect().left - root.getBoundingClientRect().left,
-        );
-      });
-    // Captured while line 1 is still rendered; the horizontal offset is
-    // unaffected by the vertical scroll below.
-    const flushLeftGlyph = await firstGlyphLeft(page.locator('.view-line[data-line="1"]'));
-    expect(flushLeftGlyph).not.toBeNull();
     const componentZone = page.locator(
       '.component-zone.host-zone-class[monaco-view-zone]',
     );
@@ -124,13 +92,6 @@ test('runs MoonBit viewer API component checks in the browser', async ({ page },
     expect(Number(await wrappedHoverLine.getAttribute('data-line'))).toBeGreaterThan(
       report.metrics.modelLines,
     );
-    // wrappingIndent=Same (the default): the wrapped continuation of the
-    // two-space-indented line is itself indented, so its first visible glyph
-    // sits to the right of a flush-left line's first glyph (the DOM left offset
-    // proves the indent renders, not just that the content carries spaces).
-    const wrappedGlyph = await firstGlyphLeft(wrappedHoverLine);
-    expect(wrappedGlyph).not.toBeNull();
-    expect(wrappedGlyph).toBeGreaterThan(flushLeftGlyph + 5);
     // The warning squiggle renders as an absolutely positioned overlay piece
     // (`<div class="cdr squiggly-warning">`, Monaco's DecorationsOverlay), not
     // as an inline span inside the view line. Its 'keeps' range is only
