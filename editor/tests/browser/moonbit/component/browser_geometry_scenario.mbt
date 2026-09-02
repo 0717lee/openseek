@@ -115,7 +115,8 @@ fn browser_geometry_source(hidden_widest : Bool) -> String {
     "a\tb\tc ｍ e\u{0301}",
     "pre anchor post",
     "visible_widest_\{"W".repeat(36)}",
-    "line_05",
+    // Two source spaces plus enough fixed-width glyphs to force one continuation.
+    "  \{"q".repeat(44)}",
     "line_06",
     "line_07",
     "line_08",

@@ -125,6 +125,34 @@ async function injectedGeometry(page, font) {
   });
 }
 
+async function firstGlyphGeometry(lineContent) {
+  return lineContent.evaluate((content) => {
+    const text = content.textContent || '';
+    const index = text.search(/\S/u);
+    if (index < 0) return null;
+
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+    let remaining = index;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (remaining >= node.textContent.length) {
+        remaining -= node.textContent.length;
+        continue;
+      }
+      const range = document.createRange();
+      range.setStart(node, remaining);
+      range.setEnd(node, remaining + 1);
+      const rect = range.getBoundingClientRect();
+      const contentRect = content.getBoundingClientRect();
+      return {
+        text,
+        left: rect.left - contentRect.left,
+        width: rect.width,
+      };
+    }
+    return null;
+  });
+}
+
 function expectNear(actual, expected, tolerance = 1) {
   expect(Math.abs(actual - expected)).toBeLessThanOrEqual(tolerance);
 }
@@ -170,6 +198,38 @@ test('embedded mono and proportional fonts give fixed tabs fullwidth and combini
     expectNear((await state(page, 'monospace', 2, 5)).offset, 76.8, 1);
     expectNear((await state(page, 'proportional', 2, 3)).offset, 22.72, 1);
     expectNear((await state(page, 'proportional', 2, 5)).offset, 45.44, 1);
+  } finally {
+    reporter.dispose();
+  }
+});
+
+test('wrapped continuations render Same indentation at exactly two fixed-font columns', async ({
+  page,
+}, testInfo) => {
+  const reporter = await mountGeometry(page, testInfo);
+  try {
+    await page.evaluate(() => document.fonts.ready);
+    const unwrapped = await state(page, 'monospace', 5, 3);
+    expect(unwrapped.softWrap).toBe(false);
+
+    await control(page, 'set_wrap', 'monospace', true);
+    await expect
+      .poll(async () => (await state(page, 'monospace', 5, 3)).viewLines)
+      .toBeGreaterThan(unwrapped.viewLines);
+    await settle(page);
+
+    const wrappedSegments = page
+      .locator(`${hostSelector('monospace')} .view-line-content`)
+      .filter({ hasText: /q{4}/u });
+    await expect(wrappedSegments).toHaveCount(2);
+    const continuation = wrappedSegments.nth(1);
+    await expect(continuation).toBeVisible();
+
+    const glyph = await firstGlyphGeometry(continuation);
+    expect(glyph).not.toBeNull();
+    expect(glyph.text).toMatch(/^\u00a0\u00a0q/u);
+    expectNear(glyph.width, 9.6, 0.15);
+    expectNear(glyph.left, glyph.width * 2, 0.15);
   } finally {
     reporter.dispose();
   }
