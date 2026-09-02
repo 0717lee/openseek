@@ -33,6 +33,7 @@ test "settings status preserves and requires the GLM capability flag" {
     "has_deepseek_key": false,
     "has_glm_key": true,
     "has_custom_key": false,
+    "followup_behavior": "steer",
   })
   let missing : @protocol.SettingsStatusPayload? = Some(
     @json.from_json({

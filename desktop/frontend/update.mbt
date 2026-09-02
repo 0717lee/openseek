@@ -1815,7 +1815,6 @@ fn update_msg(
       theme~,
       font~,
       font_size~,
-      followup_behavior~,
       model=stored,
       conversation_models=remembered,
       agent~,
@@ -1827,7 +1826,6 @@ fn update_msg(
       let theme = Theme::parse(theme, model.theme)
       let app_font = AppFont::parse(font, model.app_font)
       let app_font_size = AppFontSize::parse(font_size, model.app_font_size)
-      let followup_behavior = FollowupBehavior::parse(followup_behavior)
       // Startup runs before any conversation exists, so adopting the stored
       // tiers here is enough — every conversation minted afterwards reads
       // them.
@@ -1876,7 +1874,6 @@ fn update_msg(
         theme,
         app_font,
         app_font_size,
-        followup_behavior,
         default_model,
         default_agent,
         conversation_models: parse_conversation_models(remembered),
@@ -2924,13 +2921,22 @@ fn update_msg(
       (push, next.settle_api_setup())
     }
     FollowupBehaviorChanged(value) => {
+      guard model.host_settings_loaded() else { return (@cmd.none, model) }
       let behavior = FollowupBehavior::parse(value)
-      let model = { ..model, select_menu: None, }
-      if behavior == model.followup_behavior {
-        (@cmd.none, model)
-      } else {
-        (behavior.save(), { ..model, followup_behavior: behavior, })
-      }
+      (
+        push_host_settings(
+          dispatch,
+          model.focused,
+          followup_behavior_patch(behavior),
+          model.focused_connection_generation(),
+        ),
+        {
+          ..model,
+          followup_behavior: behavior,
+          settings_saves: model.settings_saves + 1,
+          select_menu: None,
+        },
+      )
     }
     CustomApiUrlChanged(value) => {
       guard model.host_settings_loaded() else { return (@cmd.none, model) }
@@ -12409,7 +12415,6 @@ test "loaded UI preferences parse their wire names" {
       theme="dark",
       font="menlo",
       font_size="15",
-      followup_behavior="queue",
       model="deepseek-v4-flash",
       conversation_models="[{\"key\":\"local/desktop-test\",\"model\":\"deepseek-v4-pro\"}]",
       agent="codex",
@@ -12424,7 +12429,6 @@ test "loaded UI preferences parse their wire names" {
   assert_true(restored.theme is Dark)
   assert_true(restored.app_font is Menlo)
   assert_eq(restored.app_font_size, AppFontSize(15))
-  assert_true(restored.followup_behavior is FollowupQueue)
   assert_true(restored.default_model is DsFlash)
   assert_true(restored.default_agent is CodexAgent)
   assert_true(restored.openseek_reasoning is ReasoningHigh)
@@ -12440,7 +12444,6 @@ test "loaded UI preferences parse their wire names" {
       theme="broken",
       font="broken",
       font_size="broken",
-      followup_behavior="broken",
       model="",
       conversation_models="not json",
       agent="broken",
@@ -12455,7 +12458,6 @@ test "loaded UI preferences parse their wire names" {
   assert_true(unknown.theme is System)
   assert_true(unknown.app_font is SystemMono)
   assert_eq(unknown.app_font_size, AppFontSize(14))
-  assert_true(unknown.followup_behavior is FollowupSteer)
   assert_true(unknown.default_model is DsFlash)
   assert_true(unknown.openseek_reasoning is ReasoningHigh)
   assert_true(unknown.glm_reasoning is ReasoningOff)
@@ -12894,6 +12896,7 @@ fn host_settings(
     has_deepseek_key,
     has_glm_key,
     has_custom_key: false,
+    followup_behavior: "steer",
   }
 }
 
@@ -13115,7 +13118,6 @@ test "the GLM provider aligns only a fresh chat to its model family" {
       theme="",
       font="",
       font_size="",
-      followup_behavior="queue",
       model="deepseek-v4-pro",
       conversation_models="",
       agent="",
@@ -13128,7 +13130,6 @@ test "the GLM provider aligns only a fresh chat to its model family" {
   )
   assert_true(preferences_after_host.default_model is Glm53)
   assert_true(preferences_after_host.active().engine_model is Glm53)
-  assert_true(preferences_after_host.followup_behavior is FollowupQueue)
   // Once a conversation has begun, its pinned model remains explicit and
   // visible for the user to change rather than being rewritten by Settings.
   let (_, running) = update(dispatch, ProviderChanged("glm"), running_model())

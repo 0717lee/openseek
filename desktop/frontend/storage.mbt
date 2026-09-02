@@ -25,7 +25,6 @@ fn load_saved_settings(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           theme=load_setting(ThemeStorageKey),
           font=load_setting(AppFontStorageKey),
           font_size=load_setting(AppFontSizeStorageKey),
-          followup_behavior=load_setting(FollowupBehaviorStorageKey),
           model=load_setting(ModelStorageKey),
           conversation_models=load_setting(ConversationModelsStorageKey),
           agent=load_setting(AgentStorageKey),
@@ -153,12 +152,6 @@ fn AppFont::save(self : AppFont) -> @cmd.Cmd {
 /// Persist the type scale used by every app-owned text surface.
 fn AppFontSize::save(self : AppFontSize) -> @cmd.Cmd {
   @cmd.custom_cmd(_ => save_setting(AppFontSizeStorageKey, self.wire()))
-}
-
-///|
-/// Persist how follow-up input behaves while a turn is running.
-fn FollowupBehavior::save(self : FollowupBehavior) -> @cmd.Cmd {
-  @cmd.custom_cmd(_ => save_setting(FollowupBehaviorStorageKey, self.wire()))
 }
 
 ///|

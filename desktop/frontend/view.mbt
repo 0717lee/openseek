@@ -1112,6 +1112,7 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
             selected=model.followup_behavior.wire(),
             aria_label="Follow-up messages",
             change=dispatch.map(value => FollowupBehaviorChanged(value)),
+            disabled=!settings_loaded,
           ),
         ],
         desc="Steer is the default. Queue keeps follow-ups editable until their turn starts.",
