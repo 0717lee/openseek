@@ -57,6 +57,8 @@ priv enum FollowerMsg {
 ///|
 priv enum FollowerLoadReply {
   LoadOk(@protocol.SessionDocument)
+  // A first turn has a live follower before its writer creates the record.
+  LoadAbsent(String)
   LoadFailed(String)
   // The follower was already draining; the caller waits/retries the actor.
   LoadStopped
@@ -220,6 +222,7 @@ async fn SessionFollower::run(
             LoadOk(follower.tail.document())
           } catch {
             error if @async.is_being_cancelled() => raise error
+            @session_record.Absent(detail) => LoadAbsent(detail)
             error => LoadFailed("\{error}")
           }
           // Keep `load_pending` set while draining. Reply queues are fresh

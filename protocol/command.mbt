@@ -34,6 +34,11 @@ pub(all) enum Command {
   /// that do not reconcile deliveries (the TUI) send none.
   Prompt(text~ : String, submission_id~ : String?)
   Steer(kind~ : SteerKind, text~ : String)
+  QueueAdd(id~ : String, text~ : String)
+  QueueEdit(id~ : String, text~ : String)
+  QueueWithdraw(id~ : String)
+  QueueSteer(id~ : String)
+  QueuePromote(id~ : String)
   Compact
   Cancel
   /// `auto` arms autonomous continuation toward the goal. No in-repo client
@@ -76,6 +81,13 @@ pub fn Command::to_json(self : Command) -> Json {
         },
         "text": text,
       }
+    QueueAdd(id~, text~) =>
+      { "command": "queue", "action": "add", "id": id, "text": text }
+    QueueEdit(id~, text~) =>
+      { "command": "queue", "action": "edit", "id": id, "text": text }
+    QueueWithdraw(id~) => { "command": "queue", "action": "withdraw", "id": id }
+    QueueSteer(id~) => { "command": "queue", "action": "steer", "id": id }
+    QueuePromote(id~) => { "command": "queue", "action": "promote", "id": id }
     Compact => { "command": "compact" }
     Cancel => { "command": "cancel" }
     // `auto` is written only when set: an engine older than the flag ignores an
@@ -147,6 +159,7 @@ pub fn Command::parse(line : Json) -> Result[Command, String] {
         _ => Ok(Prompt(text~, submission_id=None))
       }
     { "command": "steer", .. } => parse_steer(line)
+    { "command": "queue", .. } => parse_queue(line)
     { "command": "prompt", .. } => Err("expected a string \"text\" field")
     { "command": "compact", .. } => Ok(Compact)
     { "command": "cancel", .. } => Ok(Cancel)
@@ -176,6 +189,26 @@ pub fn Command::parse(line : Json) -> Result[Command, String] {
     { "command": "approval", .. } => Err("expected a string \"id\" field")
     { "command": String(other), .. } => Err("unknown command: \{other}")
     _ => Err("expected a {\"command\": ...} object")
+  }
+}
+
+///|
+fn parse_queue(line : Json) -> Result[Command, String] {
+  guard line is { "id": String(id), .. } && !id.is_blank() else {
+    return Err("expected a non-blank string \"id\" field")
+  }
+  match line {
+    { "action": String("add"), "text": String(text), .. } =>
+      Ok(QueueAdd(id~, text~))
+    { "action": String("edit"), "text": String(text), .. } =>
+      Ok(QueueEdit(id~, text~))
+    { "action": String("withdraw"), .. } => Ok(QueueWithdraw(id~))
+    { "action": String("steer"), .. } => Ok(QueueSteer(id~))
+    { "action": String("promote"), .. } => Ok(QueuePromote(id~))
+    { "action": String("add" | "edit"), .. } =>
+      Err("expected a string \"text\" field")
+    { "action": String(other), .. } => Err("unknown queue action: \{other}")
+    _ => Err("expected a string \"action\" field")
   }
 }
 

@@ -61,6 +61,27 @@ pub enum GoalMarker {
 } derive(@debug.Debug)
 pub fn GoalMarker::to_repr(Self) -> @debug.Repr
 
+pub(all) enum QueueEvent {
+  Added(id~ : String, content~ : String)
+  Edited(id~ : String, content~ : String)
+  Withdrawn(id~ : String)
+  Steered(id~ : String)
+  Promoted(id~ : String)
+} derive(Eq, @debug.Debug)
+pub fn QueueEvent::equal(Self, Self) -> Bool
+pub fn QueueEvent::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn QueueEvent::not_equal(Self, Self) -> Bool
+pub fn QueueEvent::to_repr(Self) -> @debug.Repr
+pub impl @json.FromJson for QueueEvent
+
+pub(all) struct QueuedInput {
+  id : String
+  content : String
+} derive(Eq, @debug.Debug)
+pub fn QueuedInput::equal(Self, Self) -> Bool
+pub fn QueuedInput::not_equal(Self, Self) -> Bool
+pub fn QueuedInput::to_repr(Self) -> @debug.Repr
+
 pub struct RuntimeNotice {
   // private fields
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
@@ -81,6 +102,7 @@ pub fn Session::events(Self) -> @vector.Vector[SessionEvent]
 pub fn Session::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 pub fn Session::id(Self) -> SessionId
 pub fn Session::last_sequence(Self) -> Int
+pub fn Session::queued_inputs(Self) -> Array[QueuedInput]
 pub fn Session::summary_item(Self, content~ : String, from_sequence~ : Int, to_sequence~ : Int) -> SessionItem raise
 pub fn Session::system_prompt(Self) -> String
 pub fn Session::to_json(Self) -> Json
@@ -109,6 +131,7 @@ pub(all) enum SessionItem {
   Assistant(AssistantMessage)
   Tool(ToolResult)
   Runtime(RuntimeNotice)
+  Queue(QueueEvent)
   Summary(SessionSummary)
   Terminal(TurnTerminal)
 } derive(Eq, @debug.Debug)

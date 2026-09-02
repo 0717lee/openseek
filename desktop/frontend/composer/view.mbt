@@ -342,18 +342,70 @@ pub fn ContextComponent::render(
           "Got it",
         ),
       ])
-    PendingSteerPanel(items~) => {
+    PendingSteerPanel(items~, queued~) => {
       let rows : Array[@html.Html] = []
       for shown in items {
         rows.push(
           @html.div(class="pending-steer-row", title=shown, [
             @html.span(class="pending-steer-icon", "⤷"),
             @html.span(class="pending-steer-text", shown),
-            @html.span(class="pending-steer-state", "steering…"),
+            @html.span(
+              class="pending-steer-state",
+              if queued {
+                "queueing…"
+              } else {
+                "steering…"
+              },
+            ),
           ]),
         )
       }
       @html.div(class="pending-steers", rows)
+    }
+    QueuedInputPanel(items~) => {
+      let rows : Array[@html.Html] = []
+      for item in items {
+        rows.push(
+          @html.div(class="queued-input-row", title=item.content, [
+            @html.span(class="queued-input-icon", "↳"),
+            @html.span(class="queued-input-text", item.content),
+            @html.div(class="queued-input-actions", [
+              @html.button(
+                class="queued-input-action",
+                type_="button",
+                title="Edit this queued message",
+                on_click=action_emit(
+                  QueuedInputEditRequested(identity~, id=item.id),
+                ),
+                if item.editing {
+                  "Editing"
+                } else {
+                  "Edit"
+                },
+              ),
+              @html.button(
+                class="queued-input-action",
+                type_="button",
+                title="Send this message to the current turn now",
+                on_click=action_emit(
+                  QueuedInputSteerRequested(identity~, id=item.id),
+                ),
+                "Steer",
+              ),
+              @html.button(
+                class="queued-input-action danger",
+                type_="button",
+                title="Withdraw this queued message",
+                on_click=action_emit(
+                  QueuedInputWithdrawRequested(identity~, id=item.id),
+                ),
+                "Withdraw",
+              ),
+            ]),
+          ]),
+        )
+      }
+      @html.div(class="queued-inputs", rows)
     }
     CompactionNotice(queued~) =>
       @html.div(class="composer-notice", [

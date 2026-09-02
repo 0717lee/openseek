@@ -2034,6 +2034,9 @@ fn update_msg(
         | @composer.WorktreeModeToggled(..)
         | @composer.ApiSetupRequested(..)
         | @composer.ArchivedInputDismissed(..)
+        | @composer.QueuedInputEditRequested(..)
+        | @composer.QueuedInputSteerRequested(..)
+        | @composer.QueuedInputWithdrawRequested(..)
         | @composer.WorktreePlacementRetried(..)
         | @composer.MissingWorktreeRebuildRequested(..)
         | @composer.MissingWorktreeArchiveRequested(..) => {
@@ -2069,6 +2072,68 @@ fn update_msg(
               update_msg(dispatch, OpenApiSetup, model)
             @composer.ArchivedInputDismissed(..) =>
               update_msg(dispatch, DismissArchivedPendingInput, model)
+            @composer.QueuedInputEditRequested(id~, ..) => {
+              guard conv.queued_inputs.search_by(item => item.id == id)
+                is Some(index) else {
+                return (@cmd.none, model)
+              }
+              let item = conv.queued_inputs[index]
+              (
+                @cmd.none,
+                model.replace_conversation({
+                  ..conv,
+                  task: user_display_text(item.content),
+                  mentions: [],
+                  composer_draft_present: true,
+                  queue_edit_id: Some(id),
+                }),
+              )
+            }
+            @composer.QueuedInputSteerRequested(id~, ..) => {
+              guard conv.run is Open(run_id~, stage~) && !(stage is Cancelling) else {
+                return (@cmd.none, model)
+              }
+              (
+                queue_openseek(
+                  dispatch,
+                  conv.device,
+                  conv.session_id,
+                  "steer",
+                  id,
+                  None,
+                  run_id,
+                ),
+                model,
+              )
+            }
+            @composer.QueuedInputWithdrawRequested(id~, ..) => {
+              guard conv.run is Open(run_id~, stage~) && !(stage is Cancelling) else {
+                return (@cmd.none, model)
+              }
+              let editing = conv.queue_edit_id == Some(id)
+              (
+                queue_openseek(
+                  dispatch,
+                  conv.device,
+                  conv.session_id,
+                  "withdraw",
+                  id,
+                  None,
+                  run_id,
+                ),
+                if editing {
+                  model.replace_conversation({
+                    ..conv,
+                    task: "",
+                    mentions: [],
+                    composer_draft_present: false,
+                    queue_edit_id: None,
+                  })
+                } else {
+                  model
+                },
+              )
+            }
             @composer.WorktreePlacementRetried(..) =>
               update_msg(dispatch, RetryWorktreePlacement, model)
             @composer.MissingWorktreeRebuildRequested(..) =>
@@ -2853,6 +2918,24 @@ fn update_msg(
       // opens the modal — it is the announcement now, not a toast.
       (push, next.settle_api_setup())
     }
+    FollowupBehaviorChanged(value) => {
+      guard model.host_settings_loaded() else { return (@cmd.none, model) }
+      let behavior = FollowupBehavior::parse(value)
+      (
+        push_host_settings(
+          dispatch,
+          model.focused,
+          followup_behavior_patch(behavior),
+          model.focused_connection_generation(),
+        ),
+        {
+          ..model,
+          followup_behavior: behavior,
+          settings_saves: model.settings_saves + 1,
+          select_menu: None,
+        },
+      )
+    }
     CustomApiUrlChanged(value) => {
       guard model.host_settings_loaded() else { return (@cmd.none, model) }
       (
@@ -3361,6 +3444,27 @@ fn update_msg(
         // engine's queue and contaminate a later prompt — so the text stays
         // in the composer.
         if conv.run is Open(run_id~, stage~) && !(stage is Cancelling) {
+          if conv.queue_edit_id is Some(id) {
+            let (model, _) = model.allocate_submission_id()
+            return (
+              queue_openseek(
+                dispatch,
+                model.focused,
+                conv.session_id,
+                "edit",
+                id,
+                Some(task),
+                run_id,
+              ),
+              model.replace_conversation({
+                ..conv,
+                task: "",
+                mentions: [],
+                composer_draft_present: false,
+                queue_edit_id: None,
+              }),
+            )
+          }
           let (model, submission_id) = model.allocate_submission_id()
           let conv = conv.enqueue_steer(
             submission_id,
@@ -3369,7 +3473,17 @@ fn update_msg(
             conv.task,
             conv.mentions,
           )
-          (
+          let command = if model.followup_behavior is FollowupQueue {
+            queue_openseek(
+              dispatch,
+              model.focused,
+              conv.session_id,
+              "add",
+              submission_id,
+              Some(task),
+              run_id,
+            )
+          } else {
             steer_openseek(
               dispatch,
               model.focused,
@@ -3377,7 +3491,10 @@ fn update_msg(
               submission_id,
               task,
               run_id,
-            ),
+            )
+          }
+          (
+            command,
             {
               ..model.replace_conversation({
                 ..conv,
@@ -5380,6 +5497,21 @@ fn update_device_msg(
       } else {
         (@cmd.none, model)
       }
+    QueueAddRejected(session~, submission_id~, run_id~) =>
+      if model.find_conversation(channel, session) is Some(conv) {
+        let (next, removed) = conv.reject_steer(submission_id, Some(run_id))
+        if removed {
+          model
+          .replace_conversation(next)
+          .notify_error(
+            dispatch, "Message was not queued (the task ended as you sent it) — it is back in the composer.",
+          )
+        } else {
+          (@cmd.none, model)
+        }
+      } else {
+        (@cmd.none, model)
+      }
     CancelNotOpen(run_id~) => {
       guard model.conversation_by_run(channel, run_id) is Some(conv) else {
         return (@cmd.none, model)
@@ -6254,6 +6386,14 @@ fn update_device_msg(
         dispatch, channel, model, session, items, watermark, goal, goal_markers,
         generation, true,
       )
+    SessionQueueSnapshot(session~, queued_inputs~, generation~) => {
+      guard model.find_conversation(channel, session) is Some(conv) &&
+        conv.sync is Reloading(generation=current, ..) &&
+        current == generation else {
+        return (@cmd.none, model)
+      }
+      (@cmd.none, model.replace_conversation({ ..conv, queued_inputs, }))
+    }
     SessionRefreshed(
       session~,
       items~,
@@ -12754,6 +12894,7 @@ fn host_settings(
     has_deepseek_key,
     has_glm_key,
     has_custom_key: false,
+    followup_behavior: "steer",
   }
 }
 

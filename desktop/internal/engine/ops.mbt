@@ -78,8 +78,16 @@ pub async fn start_run(
   // during one of them holds the engine now, and the Running transition
   // below would silently clobber it. Re-check on the engine this run will
   // actually use.
-  if live.phase is Compacting(..) {
-    raise EngineError("this conversation is compacting; wait for it to finish")
+  match live.phase {
+    Compacting(..) =>
+      raise EngineError(
+        "this conversation is compacting; wait for it to finish",
+      )
+    Running(..) =>
+      raise EngineError(
+        "this conversation resumed a queued follow-up; wait for it to finish",
+      )
+    Idle(..) => ()
   }
   let run_id = mint_run_id()
   // The normalized tag rides the wire command so the engine records it on the
@@ -275,6 +283,8 @@ pub async fn compact_run(
       raise EngineError(
         "a compaction is already queued behind the running turn",
       )
+    Running(..) if !live.queued_runs.is_empty() =>
+      raise EngineError("cannot compact while follow-up messages are queued")
     // Sent mid-turn, the command queues behind the open run; the flag makes
     // the turn's terminal event land in Compacting so nothing slips into the
     // gap before the engine's own compaction_started.
@@ -445,6 +455,63 @@ pub fn steer_run(
   // settles it without restoring a duplicate draft.
   live.steer_runs.record_sent(payload.text, submission_id) |> ignore
   { steered: true, run_id: Some(run_id), }
+}
+
+///|
+/// Submit one durable queue mutation to the currently running turn's serve
+/// engine. The session record, not this immediate write acknowledgement, is
+/// the authoritative result observed by clients.
+pub fn queue_run(
+  manager : EngineManager,
+  payload : @protocol.QueuePayload,
+) -> @protocol.QueueReply raise EngineError {
+  let id = payload.id.trim().to_owned()
+  guard !id.is_empty() else { return { accepted: false, run_id: None, } }
+  guard open_run_engine(manager, run_id?=payload.run_id) is Some(live) &&
+    live.phase is Running(run_id~, ..) else {
+    return { accepted: false, run_id: None, }
+  }
+  if payload.run_id is Some(expected) && run_id != expected {
+    return { accepted: false, run_id: None, }
+  }
+  let command = match payload.action {
+    "add" => {
+      guard !(live.phase is Running(compact_queued=true, ..)) else {
+        return { accepted: false, run_id: Some(run_id), }
+      }
+      guard payload.text is Some(text) && !text.is_blank() else {
+        return { accepted: false, run_id: Some(run_id), }
+      }
+      @protocol.queue_add(id, text)
+    }
+    "edit" => {
+      guard payload.text is Some(text) && !text.is_blank() else {
+        return { accepted: false, run_id: Some(run_id), }
+      }
+      @protocol.queue_edit(id, text)
+    }
+    "withdraw" => @protocol.queue_withdraw(id)
+    "steer" => @protocol.queue_steer(id)
+    _ => return { accepted: false, run_id: Some(run_id), }
+  }
+  guard live.submit(
+    command,
+    failure_reason="failed to write queue command to the engine",
+  ) else {
+    return { accepted: false, run_id: Some(run_id), }
+  }
+  match payload.action {
+    "add" => live.queued_runs.push({ id, run_id: mint_run_id(), })
+    "withdraw" | "steer" =>
+      for index, queued in live.queued_runs {
+        if queued.id == id {
+          ignore(live.queued_runs.remove(index))
+          break
+        }
+      }
+    "edit" | _ => ()
+  }
+  { accepted: true, run_id: Some(run_id), }
 }
 
 ///|
@@ -698,6 +765,7 @@ async fn follower_snapshot(
     match request_follower_load(follower) {
       LoadOk(document) => return Some(document)
       LoadStopped => continue
+      LoadAbsent(detail) => raise EngineError("session load failed: " + detail)
       LoadFailed(detail) => raise EngineError("session load failed: " + detail)
     }
   }

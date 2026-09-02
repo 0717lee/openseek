@@ -90,6 +90,13 @@ pub(all) struct ApprovalNotice {
 } derive(Eq)
 
 ///|
+pub(all) struct QueuedInput {
+  id : String
+  content : String
+  editing : Bool
+} derive(Eq)
+
+///|
 /// One app-server reverse request shown above the Codex draft. The request is
 /// plain state: callers cannot inject DOM or commands, and every answer comes
 /// back through an identity-scoped composer Action.
@@ -111,7 +118,8 @@ pub(all) enum ContextComponent {
   ApprovalRequest(ApprovalNotice)
   CodexRequests(requests~ : Array[CodexRequestInput])
   ArchivedInputNotice(text~ : String)
-  PendingSteerPanel(items~ : Array[String])
+  PendingSteerPanel(items~ : Array[String], queued~ : Bool)
+  QueuedInputPanel(items~ : Array[QueuedInput])
   CompactionNotice(queued~ : Bool)
   WorktreePlacementNotice
   MissingWorktreeNoticeComponent(MissingWorktreeNotice)
@@ -258,6 +266,9 @@ pub(all) enum Action {
   WorktreeModeToggled(identity~ : Identity)
   ApiSetupRequested(identity~ : Identity)
   ArchivedInputDismissed(identity~ : Identity)
+  QueuedInputEditRequested(identity~ : Identity, id~ : String)
+  QueuedInputSteerRequested(identity~ : Identity, id~ : String)
+  QueuedInputWithdrawRequested(identity~ : Identity, id~ : String)
   WorktreePlacementRetried(identity~ : Identity)
   MissingWorktreeRebuildRequested(identity~ : Identity)
   MissingWorktreeArchiveRequested(identity~ : Identity)
@@ -294,6 +305,9 @@ pub fn Action::identity(self : Action) -> Identity {
     | WorktreeModeToggled(identity~)
     | ApiSetupRequested(identity~)
     | ArchivedInputDismissed(identity~)
+    | QueuedInputEditRequested(identity~, ..)
+    | QueuedInputSteerRequested(identity~, ..)
+    | QueuedInputWithdrawRequested(identity~, ..)
     | WorktreePlacementRetried(identity~)
     | MissingWorktreeRebuildRequested(identity~)
     | MissingWorktreeArchiveRequested(identity~) => identity
@@ -304,6 +318,9 @@ pub fn Action::identity(self : Action) -> Identity {
 #deprecated("Use `==` or the `Eq` trait directly", skip_current_package=true)
 #doc(hidden)
 pub extend ApprovalNotice with Eq::{equal, not_equal}
+
+///|
+pub extend QueuedInput with Eq::{equal, not_equal}
 
 ///|
 #deprecated("Use `==` or the `Eq` trait directly", skip_current_package=true)

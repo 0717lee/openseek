@@ -444,6 +444,29 @@ priv enum ApiProvider {
 } derive(Eq)
 
 ///|
+priv enum FollowupBehavior {
+  FollowupSteer
+  FollowupQueue
+} derive(Eq)
+
+///|
+fn FollowupBehavior::parse(value : String) -> FollowupBehavior {
+  if value == "queue" {
+    FollowupQueue
+  } else {
+    FollowupSteer
+  }
+}
+
+///|
+fn FollowupBehavior::wire(self : FollowupBehavior) -> String {
+  match self {
+    FollowupSteer => "steer"
+    FollowupQueue => "queue"
+  }
+}
+
+///|
 fn ApiProvider::wire(self : ApiProvider) -> String {
   match self {
     Deepseek => "deepseek"
@@ -831,6 +854,11 @@ priv struct Conversation {
   // they belong to. Canonical User text never claims ownership, so identical
   // steers from multiple clients cannot collide.
   pending_steers : Array[PendingSteer]
+  // Durable prompts waiting to become later turns. Unlike `pending_steers`,
+  // this is reconstructed exclusively from session queue events.
+  queued_inputs : Array[@transcript.QueuedInput]
+  // The queued prompt currently loaded into the main composer for editing.
+  queue_edit_id : String?
   // The permission question this conversation's engine is blocked on, if any.
   //
   // A field rather than a queue because the engine can only be blocked on one
@@ -1268,6 +1296,7 @@ priv enum SelectMenu {
   CodexModelMenu
   CodexReasoningMenu
   ApiProviderMenu
+  FollowupBehaviorMenu
   ThemeMenu
   FontMenu
   FontSizeMenu
@@ -1325,6 +1354,7 @@ priv struct Model {
   // edited through `settings.set`.
   api_provider : ApiProvider
   custom_api_url : String
+  followup_behavior : FollowupBehavior
   // Host-settings writes still in flight. While any are, incoming
   // `settings.changed` broadcasts and `settings.get` replies may predate an
   // optimistic edit, so the newest revision is deferred until the last write
@@ -1597,6 +1627,7 @@ priv struct HostSettings {
   has_deepseek_key : Bool
   has_glm_key : Bool
   has_custom_key : Bool
+  followup_behavior : String
 } derive(Eq)
 
 ///|
@@ -1681,6 +1712,7 @@ priv enum Msg {
   MaxStepsChanged(String)
   SetupApiKeyChanged(String)
   ProviderChanged(String)
+  FollowupBehaviorChanged(String)
   CustomApiUrlChanged(String)
   // The Settings choice of which window corner error toasts pop up in.
   NotificationCornerChanged(String)
@@ -2039,6 +2071,7 @@ priv enum DeviceMsg {
   // this client did not send it and must not put another client's text in
   // this composer.
   SteerRejected(session~ : String, submission_id~ : String, run_id~ : String)
+  QueueAddRejected(session~ : String, submission_id~ : String, run_id~ : String)
   // The addressed run was already absent when Stop reached the host. This is
   // success for the user's intent, but no future Finished notification can
   // retire a stale local Cancelling phase, so the reply itself must do it.
@@ -2067,6 +2100,11 @@ priv enum DeviceMsg {
     watermark~ : Int,
     goal~ : @transcript.GoalStanding?,
     goal_markers~ : Array[(Int, @transcript.GoalMarker)],
+    generation~ : Int
+  )
+  SessionQueueSnapshot(
+    session~ : String,
+    queued_inputs~ : Array[@transcript.QueuedInput],
     generation~ : Int
   )
   // A foreground stored-session read failed. Generation guards stale replies;
@@ -2388,6 +2426,8 @@ fn empty_conversation(
     pull_request_generation: 0,
     turn: RunState::empty(),
     pending_steers: [],
+    queued_inputs: [],
+    queue_edit_id: None,
     pending_approval: None,
     pending_prompt: None,
     messages: [],
@@ -2467,6 +2507,7 @@ fn initial_model() -> Model {
     setup_api_key: "",
     api_provider: Deepseek,
     custom_api_url: "",
+    followup_behavior: FollowupSteer,
     settings_saves: 0,
     host_settings_revision: -1,
     deferred_host_settings: None,
@@ -2655,6 +2696,7 @@ fn Model::clear_host_settings(self : Model) -> Model {
     api_setup_open: false,
     api_provider: Deepseek,
     custom_api_url: "",
+    followup_behavior: FollowupSteer,
     deepseek_key_saved: false,
     glm_key_saved: false,
     custom_key_saved: false,
@@ -2679,6 +2721,7 @@ fn Model::apply_host_settings(self : Model, settings : HostSettings) -> Model {
     deferred_host_settings: None,
     api_provider: ApiProvider::parse(settings.provider),
     custom_api_url: settings.custom_api_url,
+    followup_behavior: FollowupBehavior::parse(settings.followup_behavior),
     deepseek_key_saved: settings.has_deepseek_key,
     glm_key_saved: settings.has_glm_key,
     custom_key_saved: settings.has_custom_key,
@@ -3854,10 +3897,34 @@ fn Conversation::apply_commit(
   } else {
     self.goal
   }
+  let queued_inputs = self.queued_inputs.copy()
+  if item is @protocol.Queue(event) {
+    @transcript.apply_queue_event(queued_inputs, event)
+  }
+  let pending_steers = if item is @protocol.Queue(@protocol.Added(id~, ..)) {
+    self.pending_steers.filter(input => input.submission_id != id)
+  } else {
+    self.pending_steers
+  }
+  let queue_edit_id = if item
+    is @protocol.Queue(
+      @protocol.Edited(id~, ..)
+      | @protocol.Withdrawn(id~)
+      | @protocol.Steered(id~)
+      | @protocol.Promoted(id~)
+    ) &&
+    self.queue_edit_id == Some(id) {
+    None
+  } else {
+    self.queue_edit_id
+  }
   let conv = {
     ..self,
     messages,
     goal,
+    queued_inputs,
+    pending_steers,
+    queue_edit_id,
     // Settled by what this commit made the record say, not by whose command
     // it was — see `GoalRequest::settled_by`.
     goal_pending: if self.goal_pending is Some(pending) &&

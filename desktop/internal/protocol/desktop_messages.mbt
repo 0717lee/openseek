@@ -74,6 +74,16 @@ pub(all) struct SteerPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// One mutation of the durable follow-up queue. `text` is required by add and
+/// edit and absent for withdraw and steer.
+pub(all) struct QueuePayload {
+  action : String
+  id : String
+  text : String?
+  run_id : String?
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
 /// One answer to an engine's `approval_requested`, addressed by the id that
 /// event carried. `run_id` guards the same race a steer's does: a decision
 /// minted against one run must not settle a question in the next.
@@ -195,6 +205,7 @@ pub(all) struct SettingsSetPayload {
   deepseek_api_key : String?
   glm_api_key : String?
   custom_api_key : String?
+  followup_behavior : String?
 } derive(Debug, Eq)
 
 ///|
@@ -207,6 +218,7 @@ pub impl FromJson for SettingsSetPayload with fn from_json(json, path) {
     deepseek_api_key: object.optional_string("deepseek_api_key"),
     glm_api_key: object.optional_string("glm_api_key"),
     custom_api_key: object.optional_string("custom_api_key"),
+    followup_behavior: object.optional_string("followup_behavior"),
   }
 }
 
@@ -227,6 +239,9 @@ pub impl ToJson for SettingsSetPayload with fn to_json(self) {
   }
   if self.glm_api_key is Some(value) {
     fields["glm_api_key"] = value.to_json()
+  }
+  if self.followup_behavior is Some(value) {
+    fields["followup_behavior"] = value.to_json()
   }
   if self.custom_api_key is Some(value) {
     fields["custom_api_key"] = value.to_json()
@@ -1105,6 +1120,7 @@ pub(all) struct SettingsStatusPayload {
   has_deepseek_key : Bool
   has_glm_key : Bool
   has_custom_key : Bool
+  followup_behavior : String
 } derive(Debug, Eq)
 
 ///|
@@ -1117,6 +1133,9 @@ pub impl FromJson for SettingsStatusPayload with fn from_json(json, path) {
     has_deepseek_key: object.required_bool("has_deepseek_key"),
     has_glm_key: object.required_bool("has_glm_key"),
     has_custom_key: object.required_bool("has_custom_key"),
+    followup_behavior: object
+    .optional_string("followup_behavior")
+    .unwrap_or("steer"),
   }
 }
 
@@ -1128,6 +1147,7 @@ pub impl ToJson for SettingsStatusPayload with fn to_json(self) {
     "has_deepseek_key": self.has_deepseek_key.to_json(),
     "has_glm_key": self.has_glm_key.to_json(),
     "has_custom_key": self.has_custom_key.to_json(),
+    "followup_behavior": self.followup_behavior.to_json(),
   }
   if self.custom_api_url is Some(value) {
     fields["custom_api_url"] = value.to_json()
@@ -1926,6 +1946,18 @@ pub extend SteerPayload with Eq::{equal, not_equal}
 
 ///|
 pub extend SteerPayload with ToJson::{to_json}
+
+///|
+pub extend QueuePayload with Debug::{to_repr}
+
+///|
+pub extend QueuePayload with FromJson::{from_json}
+
+///|
+pub extend QueuePayload with Eq::{equal, not_equal}
+
+///|
+pub extend QueuePayload with ToJson::{to_json}
 
 ///|
 pub extend SubrunProgressPayload with Debug::{to_repr}

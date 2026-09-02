@@ -243,6 +243,7 @@ fn compare_subrun_path(left : Array[Int], right : Array[Int]) -> Int {
 /// An empty record therefore remains at 0 in either shape.
 pub struct SessionLoadView {
   items : Array[TranscriptItem]
+  queued_inputs : Array[QueuedInput]
   watermark : Int
   // The standing goal the snapshot's `[goal]` markers reduce to — the seed
   // the client's live marker commits then fold on top of.
@@ -272,6 +273,7 @@ pub fn session_from_reply(
   let mut derived_watermark = 0
   let mut goal : GoalStanding? = None
   let goal_markers : Array[(Int, GoalMarker)] = []
+  let queued_inputs : Array[QueuedInput] = []
   for event in reply.session.events.unwrap_or([]) {
     // Old desktop hosts return the store JSON verbatim without a top-level
     // watermark, but every stored event already carries its sequence. Derive
@@ -296,12 +298,45 @@ pub fn session_from_reply(
       goal = apply_goal_marker(goal, marker)
       goal_markers.push((event.sequence, marker))
     }
+    if event.item is @desktop_protocol.Queue(queue_event) {
+      apply_queue_event(queued_inputs, queue_event)
+    }
   }
   {
     items,
+    queued_inputs,
     watermark: reply.watermark.unwrap_or(derived_watermark),
     goal,
     goal_markers,
+  }
+}
+
+///|
+pub fn apply_queue_event(
+  items : Array[QueuedInput],
+  event : @desktop_protocol.SessionQueueEvent,
+) -> Unit {
+  match event {
+    @desktop_protocol.Added(id~, content~) =>
+      if !items.iter().any(item => item.id == id) {
+        items.push({ id, content, })
+      }
+    @desktop_protocol.Edited(id~, content~) =>
+      for index, item in items {
+        if item.id == id {
+          items[index] = { id, content, }
+          return
+        }
+      }
+    @desktop_protocol.Withdrawn(id~)
+    | @desktop_protocol.Steered(id~)
+    | @desktop_protocol.Promoted(id~) =>
+      for index, item in items {
+        if item.id == id {
+          ignore(items.remove(index))
+          return
+        }
+      }
   }
 }
 
@@ -536,6 +571,7 @@ pub fn apply_session_item(
             }
         }
       }
+    @desktop_protocol.Queue(_) => ()
     @desktop_protocol.Summary(payload) => {
       let content = payload.content.trim().to_owned()
       if !content.is_empty() {

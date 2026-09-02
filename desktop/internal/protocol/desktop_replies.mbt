@@ -105,6 +105,12 @@ pub(all) struct SteerReply {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+pub(all) struct QueueReply {
+  accepted : Bool
+  run_id : String?
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
 pub(all) struct ApprovalReply {
   // Whether the decision reached a live engine that could still be waiting
   // for it. False means the question is already gone — the turn that asked it
@@ -571,6 +577,52 @@ pub impl FromJson for SessionTerminal with fn from_json(json, path) {
 }
 
 ///|
+pub(all) enum SessionQueueEvent {
+  Added(id~ : String, content~ : String)
+  Edited(id~ : String, content~ : String)
+  Withdrawn(id~ : String)
+  Steered(id~ : String)
+  Promoted(id~ : String)
+} derive(Debug, Eq)
+
+///|
+pub impl ToJson for SessionQueueEvent with fn to_json(self) {
+  match self {
+    Added(id~, content~) => { "action": "added", "id": id, "content": content }
+    Edited(id~, content~) =>
+      { "action": "edited", "id": id, "content": content }
+    Withdrawn(id~) => { "action": "withdrawn", "id": id }
+    Steered(id~) => { "action": "steered", "id": id }
+    Promoted(id~) => { "action": "promoted", "id": id }
+  }
+}
+
+///|
+pub impl FromJson for SessionQueueEvent with fn from_json(json, path) {
+  guard json is Object(fields) &&
+    fields.get("action") is Some(String(action)) &&
+    fields.get("id") is Some(String(id)) else {
+    raise JsonDecodeError((path, "expected session queue event"))
+  }
+  match action {
+    "added" | "edited" => {
+      guard fields.get("content") is Some(String(content)) else {
+        raise JsonDecodeError((path.add_key("content"), "expected string"))
+      }
+      if action == "added" {
+        Added(id~, content~)
+      } else {
+        Edited(id~, content~)
+      }
+    }
+    "withdrawn" => Withdrawn(id~)
+    "steered" => Steered(id~)
+    "promoted" => Promoted(id~)
+    _ => raise JsonDecodeError((path.add_key("action"), "unknown queue action"))
+  }
+}
+
+///|
 /// The durable session item's tagged payload. Its manual codec preserves the
 /// engine store's `{kind,payload}` representation. `Unknown` retains the whole
 /// raw item so an older Desktop can load and forward records written by a newer
@@ -581,6 +633,7 @@ pub(all) enum SessionItem {
   Assistant(SessionAssistantMessage)
   ToolResult(SessionToolResult)
   RuntimeNotice(SessionRuntimeNotice)
+  Queue(SessionQueueEvent)
   Summary(SessionSummary)
   Terminal(SessionTerminal)
   UnknownTerminal(Json)
@@ -594,6 +647,7 @@ pub impl ToJson for SessionItem with fn to_json(self) {
     Assistant(payload) => { "kind": "assistant", "payload": payload }
     ToolResult(payload) => { "kind": "tool_result", "payload": payload }
     RuntimeNotice(payload) => { "kind": "runtime_notice", "payload": payload }
+    Queue(payload) => { "kind": "queue", "payload": payload }
     Summary(payload) => { "kind": "summary", "payload": payload }
     Terminal(payload) => { "kind": "terminal", "payload": payload }
     UnknownTerminal(raw) => raw
@@ -635,6 +689,10 @@ pub impl FromJson for SessionItem with fn from_json(json, path) {
       }
     "runtime_notice" =>
       RuntimeNotice(@json.from_json(payload, path=path.add_key("payload"))) catch {
+        _ => Unknown(json)
+      }
+    "queue" =>
+      Queue(@json.from_json(payload, path=path.add_key("payload"))) catch {
         _ => Unknown(json)
       }
     "summary" =>
@@ -2632,6 +2690,30 @@ pub extend SteerReply with Eq::{equal, not_equal}
 
 ///|
 pub extend SteerReply with ToJson::{to_json}
+
+///|
+pub extend QueueReply with Debug::{to_repr}
+
+///|
+pub extend QueueReply with FromJson::{from_json}
+
+///|
+pub extend QueueReply with Eq::{equal, not_equal}
+
+///|
+pub extend QueueReply with ToJson::{to_json}
+
+///|
+pub extend SessionQueueEvent with Debug::{to_repr}
+
+///|
+pub extend SessionQueueEvent with FromJson::{from_json}
+
+///|
+pub extend SessionQueueEvent with Eq::{equal, not_equal}
+
+///|
+pub extend SessionQueueEvent with ToJson::{to_json}
 
 ///|
 pub extend SymbolItem with Debug::{to_repr}

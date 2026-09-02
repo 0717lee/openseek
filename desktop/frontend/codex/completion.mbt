@@ -515,6 +515,9 @@ fn State::apply_composer_action(
     | @composer.ApprovalAnswered(..)
     | @composer.ApiSetupRequested(..)
     | @composer.ArchivedInputDismissed(..)
+    | @composer.QueuedInputEditRequested(..)
+    | @composer.QueuedInputSteerRequested(..)
+    | @composer.QueuedInputWithdrawRequested(..)
     | @composer.WorktreePlacementRetried(..) => (@cmd.none, self)
   }
 }

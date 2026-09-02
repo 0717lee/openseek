@@ -106,6 +106,18 @@ fn Model::composer_input(self : Model) -> @composer.Input {
     context.push(
       @composer.PendingSteerPanel(
         items=conv.pending_steers.map(steer => user_display_text(steer.content)),
+        queued=self.followup_behavior is FollowupQueue,
+      ),
+    )
+  }
+  if !conv.queued_inputs.is_empty() {
+    context.push(
+      @composer.QueuedInputPanel(
+        items=conv.queued_inputs.map(item => {
+          id: item.id,
+          content: user_display_text(item.content),
+          editing: conv.queue_edit_id == Some(item.id),
+        }),
       ),
     )
   }
@@ -172,8 +184,14 @@ fn Model::composer_input(self : Model) -> @composer.Input {
       status,
       placeholder: if conv.goal_edit is Some(_) {
         "Describe the standing goal for this conversation — Enter sets it, Esc cancels."
+      } else if conv.queue_edit_id is Some(_) {
+        "Edit the queued message — Enter saves it."
       } else if conv.is_running() {
-        "Steer the running task — your message joins it at the next step."
+        if self.followup_behavior is FollowupQueue {
+          "Queue a follow-up for the next turn."
+        } else {
+          "Steer the running task — your message joins it at the next step."
+        }
       } else {
         "Ask SeekMoon to inspect, edit, or explain this workspace."
       },

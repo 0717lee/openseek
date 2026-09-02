@@ -1021,16 +1021,25 @@ fn open_session(
     workspace~,
     archived~,
     on_loaded=view => {
-      dispatch(
-        SessionLoaded(
-          session=session_id,
-          items=view.items,
-          watermark=view.watermark,
-          goal=view.goal,
-          goal_markers=view.goal_markers,
-          generation~,
+      @cmd.batch([
+        dispatch(
+          SessionQueueSnapshot(
+            session=session_id,
+            queued_inputs=view.queued_inputs,
+            generation~,
+          ),
         ),
-      )
+        dispatch(
+          SessionLoaded(
+            session=session_id,
+            items=view.items,
+            watermark=view.watermark,
+            goal=view.goal,
+            goal_markers=view.goal_markers,
+            generation~,
+          ),
+        ),
+      ])
     },
     on_failed=detail => {
       dispatch(
@@ -1067,16 +1076,25 @@ fn refresh_session(
     workspace~,
     archived~,
     on_loaded=view => {
-      dispatch(
-        SessionRefreshed(
-          session=session_id,
-          items=view.items,
-          watermark=view.watermark,
-          goal=view.goal,
-          goal_markers=view.goal_markers,
-          generation~,
+      @cmd.batch([
+        dispatch(
+          SessionQueueSnapshot(
+            session=session_id,
+            queued_inputs=view.queued_inputs,
+            generation~,
+          ),
         ),
-      )
+        dispatch(
+          SessionRefreshed(
+            session=session_id,
+            items=view.items,
+            watermark=view.watermark,
+            goal=view.goal,
+            goal_markers=view.goal_markers,
+            generation~,
+          ),
+        ),
+      ])
     },
     on_failed=_ => {
       dispatch(SessionRefreshFailed(session=session_id, generation~))
@@ -1229,6 +1247,63 @@ async fn steer_delivered(
     submission_id: Some(submission_id),
   })
   reply.steered
+}
+
+///|
+fn queue_openseek(
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  session : String,
+  action : String,
+  id : String,
+  text : String?,
+  run_id : String,
+) -> @cmd.Cmd {
+  let root_dispatch = dispatch
+  let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let accepted = try {
+        let reply = @interop.bridge_request(channel, @commands.agent_queue, {
+          action,
+          id,
+          text,
+          run_id: Some(run_id),
+        })
+        reply.accepted
+      } catch {
+        error => {
+          if action == "add" {
+            scheduler.add(
+              dispatch(QueueAddRejected(session~, submission_id=id, run_id~)),
+            )
+          } else {
+            scheduler.add(
+              root_dispatch(
+                HostActionFailed(
+                  "Queue action failed: \{@interop.bridge_error_text(error)}",
+                ),
+              ),
+            )
+          }
+          return
+        }
+      }
+      if !accepted {
+        if action == "add" {
+          scheduler.add(
+            dispatch(QueueAddRejected(session~, submission_id=id, run_id~)),
+          )
+        } else {
+          scheduler.add(
+            root_dispatch(
+              HostActionFailed("The queued message is no longer available."),
+            ),
+          )
+        }
+      }
+    })
+  })
 }
 
 ///|
