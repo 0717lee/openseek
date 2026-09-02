@@ -115,15 +115,22 @@ fn run_cursor_input_events_test() -> Unit {
   })
   |> ignore
   viewer.on_did_change_cursor_position(event => {
-    let committed = viewer.get_position().unwrap_or(Position(-1, -1))
-    record_cursor_position_event(
-      event.position.line_number,
-      event.position.column,
-      committed.line_number,
-      committed.column,
-      event.secondary_positions.length(),
-      event.source,
-      cursor_reason_name(event.reason),
+    let (committed_line, committed_column) = match viewer.get_position() {
+      Some(committed) =>
+        (committed.line_number.to_json(), committed.column.to_json())
+      None => (Json::null(), Json::null())
+    }
+    record_cursor_event(
+      Json({
+        "type": "position".to_json(),
+        "line": event.position.line_number.to_json(),
+        "column": event.position.column.to_json(),
+        "committedLine": committed_line,
+        "committedColumn": committed_column,
+        "secondaryCount": event.secondary_positions.length().to_json(),
+        "source": event.source.to_json(),
+        "reason": cursor_reason_name(event.reason).to_json(),
+      }).stringify(),
     )
   })
   |> ignore
@@ -131,8 +138,8 @@ fn run_cursor_input_events_test() -> Unit {
     let anchor = event.selection.get_selection_start()
     let active = event.selection.get_position()
     let old_selection_count = match event.old_selections {
-      Some(selections) => selections.length()
-      None => -1
+      Some(selections) => selections.length().to_json()
+      None => Json::null()
     }
     let (old_anchor_line, old_anchor_column, old_active_line, old_active_column) = match
       event.old_selections {
@@ -140,38 +147,54 @@ fn run_cursor_input_events_test() -> Unit {
         let old_anchor = old.get_selection_start()
         let old_active = old.get_position()
         (
-          old_anchor.line_number,
-          old_anchor.column,
-          old_active.line_number,
-          old_active.column,
+          old_anchor.line_number.to_json(),
+          old_anchor.column.to_json(),
+          old_active.line_number.to_json(),
+          old_active.column.to_json(),
         )
       }
-      _ => (-1, -1, -1, -1)
+      _ => (Json::null(), Json::null(), Json::null(), Json::null())
     }
-    let committed = viewer
-      .get_selection()
-      .unwrap_or(Selection(Position(-1, -1), Position(-1, -1)))
-    let committed_anchor = committed.get_selection_start()
-    let committed_active = committed.get_position()
-    record_cursor_selection_event(
-      anchor.line_number,
-      anchor.column,
-      active.line_number,
-      active.column,
-      event.secondary_selections.length(),
-      old_selection_count,
-      old_anchor_line,
-      old_anchor_column,
-      old_active_line,
-      old_active_column,
-      committed_anchor.line_number,
-      committed_anchor.column,
-      committed_active.line_number,
-      committed_active.column,
-      event.old_model_version_id,
-      event.model_version_id,
-      event.source,
-      cursor_reason_name(event.reason),
+    let (
+      committed_anchor_line,
+      committed_anchor_column,
+      committed_active_line,
+      committed_active_column,
+    ) = match viewer.get_selection() {
+      Some(committed) => {
+        let committed_anchor = committed.get_selection_start()
+        let committed_active = committed.get_position()
+        (
+          committed_anchor.line_number.to_json(),
+          committed_anchor.column.to_json(),
+          committed_active.line_number.to_json(),
+          committed_active.column.to_json(),
+        )
+      }
+      None => (Json::null(), Json::null(), Json::null(), Json::null())
+    }
+    record_cursor_event(
+      Json({
+        "type": "selection".to_json(),
+        "anchorLine": anchor.line_number.to_json(),
+        "anchorColumn": anchor.column.to_json(),
+        "activeLine": active.line_number.to_json(),
+        "activeColumn": active.column.to_json(),
+        "secondaryCount": event.secondary_selections.length().to_json(),
+        "oldSelectionCount": old_selection_count,
+        "oldAnchorLine": old_anchor_line,
+        "oldAnchorColumn": old_anchor_column,
+        "oldActiveLine": old_active_line,
+        "oldActiveColumn": old_active_column,
+        "committedAnchorLine": committed_anchor_line,
+        "committedAnchorColumn": committed_anchor_column,
+        "committedActiveLine": committed_active_line,
+        "committedActiveColumn": committed_active_column,
+        "oldModelVersionId": event.old_model_version_id.to_json(),
+        "modelVersionId": event.model_version_id.to_json(),
+        "source": event.source.to_json(),
+        "reason": cursor_reason_name(event.reason).to_json(),
+      }).stringify(),
     )
   })
   |> ignore
@@ -237,55 +260,9 @@ extern "js" fn record_cursor_content_event(version_id : Int) -> Unit =
   #| }
 
 ///|
-extern "js" fn record_cursor_position_event(
-  line : Int,
-  column : Int,
-  committed_line : Int,
-  committed_column : Int,
-  secondary_count : Int,
-  source : String,
-  reason : String,
-) -> Unit =
-  #| (line, column, committedLine, committedColumn, secondaryCount, source, reason) => {
-  #|   (globalThis.__cursorInputEventLog ??= []).push({
-  #|     type: 'position', line, column, committedLine, committedColumn,
-  #|     secondaryCount, source, reason,
-  #|   });
-  #| }
-
-///|
-extern "js" fn record_cursor_selection_event(
-  anchor_line : Int,
-  anchor_column : Int,
-  active_line : Int,
-  active_column : Int,
-  secondary_count : Int,
-  old_selection_count : Int,
-  old_anchor_line : Int,
-  old_anchor_column : Int,
-  old_active_line : Int,
-  old_active_column : Int,
-  committed_anchor_line : Int,
-  committed_anchor_column : Int,
-  committed_active_line : Int,
-  committed_active_column : Int,
-  old_model_version_id : Int,
-  model_version_id : Int,
-  source : String,
-  reason : String,
-) -> Unit =
-  #| (anchorLine, anchorColumn, activeLine, activeColumn, secondaryCount,
-  #|  oldSelectionCount, oldAnchorLine, oldAnchorColumn, oldActiveLine,
-  #|  oldActiveColumn, committedAnchorLine, committedAnchorColumn,
-  #|  committedActiveLine, committedActiveColumn, oldModelVersionId,
-  #|  modelVersionId, source, reason) => {
-  #|   (globalThis.__cursorInputEventLog ??= []).push({
-  #|     type: 'selection', anchorLine, anchorColumn, activeLine, activeColumn,
-  #|     secondaryCount, oldSelectionCount, oldAnchorLine, oldAnchorColumn,
-  #|     oldActiveLine, oldActiveColumn, committedAnchorLine,
-  #|     committedAnchorColumn, committedActiveLine, committedActiveColumn,
-  #|     oldModelVersionId, modelVersionId, source, reason,
-  #|   });
+extern "js" fn record_cursor_event(event_json : String) -> Unit =
+  #| (eventJson) => {
+  #|   (globalThis.__cursorInputEventLog ??= []).push(JSON.parse(eventJson));
   #| }
 
 ///|
@@ -348,6 +325,8 @@ extern "js" fn install_cursor_input_controls(
   #|       defaultPrevented: event.defaultPrevented,
   #|       targetClass: event.target?.className ?? '',
   #|       nativeSelection: document.getSelection()?.toString() ?? '',
+  #|       plain: event.clipboardData?.getData('text/plain') ?? '',
+  #|       html: event.clipboardData?.getData('text/html') ?? '',
   #|     });
   #|   });
   #|   zoneLink.addEventListener('click', (event) => {
@@ -362,14 +341,12 @@ extern "js" fn install_cursor_input_controls(
   #|     focus_events: () => [...focusLog],
   #|     pointers: () => [...pointerLog],
   #|     copies: () => [...copyLog],
-  #|     copied_payload: () => ({
-  #|       plain: globalThis.__readonlyEditorCopiedText ?? '',
-  #|       html: globalThis.__readonlyEditorCopiedHtml ?? '',
-  #|     }),
+  #|     copied_payload: () => {
+  #|       const latest = copyLog.at(-1);
+  #|       return { plain: latest?.plain ?? '', html: latest?.html ?? '' };
+  #|     },
   #|     reset_copy: () => {
   #|       copyLog.length = 0;
-  #|       delete globalThis.__readonlyEditorCopiedText;
-  #|       delete globalThis.__readonlyEditorCopiedHtml;
   #|     },
   #|     select_zone_text: () => {
   #|       focus();

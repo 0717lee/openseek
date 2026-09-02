@@ -42,7 +42,8 @@ async function runRecursiveMatrix(page, clickOptions) {
   // Step 1: a recursive click on the OUTER header's chevron toggles only the
   // regions inside it that share its (expanded) state — the inner region
   // folds, the outer header stays expanded (`folding.ts:495-505`).
-  await expandedChevrons.first().click({ force: true, ...clickOptions });
+  await expandedChevrons.first().hover();
+  await expandedChevrons.first().click(clickOptions);
   await expect(page.locator(editor)).not.toContainText('nest_leaf_a');
   await expect(page.locator(editor)).not.toContainText('nest_leaf_b');
   await expect(page.locator(editor)).toContainText('nest_branch');
@@ -54,7 +55,8 @@ async function runRecursiveMatrix(page, clickOptions) {
   // Step 2: no expanded descendants remain, so the same click now folds the
   // header itself ("If all are already folded or there are no children, also
   // fold parent").
-  await expandedChevrons.first().click({ force: true, ...clickOptions });
+  await expandedChevrons.first().hover();
+  await expandedChevrons.first().click(clickOptions);
   await expect(page.locator(editor)).not.toContainText('nest_branch');
   await expect(page.locator(editor)).not.toContainText('nest_after');
   await expect(page.locator(editor)).toContainText('nest_root');
@@ -66,7 +68,8 @@ async function runRecursiveMatrix(page, clickOptions) {
   // Step 3: a recursive click on the collapsed header toggles it together
   // with every descendant sharing its (collapsed) state — the whole subtree
   // unfolds in one gesture.
-  await collapsedChevrons.first().click({ force: true, ...clickOptions });
+  await collapsedChevrons.first().hover();
+  await collapsedChevrons.first().click(clickOptions);
   await expect(page.locator(editor)).toContainText('nest_leaf_a');
   await expect(page.locator(editor)).toContainText('nest_leaf_b');
   await expect(collapsedChevrons).toHaveCount(0);

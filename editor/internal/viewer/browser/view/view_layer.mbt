@@ -165,10 +165,7 @@ fn[T] ViewLayerRenderer::remove_lines_before(
 ) -> Unit {
   for index in 0..<remove_count {
     match (self.get_dom_node)(ctx.lines[index]) {
-      Some(node) => {
-        self.dom_node.remove_child(node.as_node())
-        record_view_layer_mutation("remove")
-      }
+      Some(node) => self.dom_node.remove_child(node.as_node())
       None => ()
     }
   }
@@ -198,10 +195,7 @@ fn[T] ViewLayerRenderer::remove_lines_after(
   let remove_index = ctx.lines_length - remove_count
   for index in 0..<remove_count {
     match (self.get_dom_node)(ctx.lines[remove_index + index]) {
-      Some(node) => {
-        self.dom_node.remove_child(node.as_node())
-        record_view_layer_mutation("remove")
-      }
+      Some(node) => self.dom_node.remove_child(node.as_node())
       None => ()
     }
   }
@@ -231,7 +225,6 @@ fn[T] ViewLayerRenderer::finish_rendering_new_lines(
     }
     nodes
   }
-  record_view_layer_mutation("new-batch")
   for index in ctx.lines_length>..0; child_index = parsed_nodes.length() - 1 {
     if was_new[index] {
       (self.set_dom_node)(ctx.lines[index], parsed_nodes[child_index])
@@ -250,7 +243,6 @@ fn[T] ViewLayerRenderer::finish_rendering_invalid_lines(
   let staging = @rdom.document().create_element("div")
   staging.set_inner_html(invalid_lines_html)
   let nodes = snapshot_element_children(staging)
-  record_view_layer_mutation("invalid-batch")
   let mut child_index = 0
   for index in 0..<ctx.lines_length {
     if was_invalid[index] {
@@ -331,15 +323,6 @@ fn[T] ViewLayerRenderer::finish_rendering(
 
 ///|
 let view_layer_string_builder : StringBuilder = StringBuilder(size_hint=100000)
-
-///|
-extern "js" fn record_view_layer_mutation(kind : String) -> Unit =
-  #| (kind) => {
-  #|   const metrics = globalThis.__moonbitViewerScrollMetrics;
-  #|   if (!metrics) return;
-  #|   metrics.viewLayer ||= {};
-  #|   metrics.viewLayer[kind] = (metrics.viewLayer[kind] || 0) + 1;
-  #| }
 
 ///|
 /// Rabbita's `get_children` exposes the live `HTMLCollection`; renderer

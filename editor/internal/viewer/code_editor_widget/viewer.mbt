@@ -1002,13 +1002,6 @@ fn CodeEditorWidget::apply_scroll_change(
         self.reset_definition_link()
       }
       self.emit_view_scroll_changed(scroll_change)
-      if scroll_change.scroll_top_changed || scroll_change.scroll_left_changed {
-        self.emit_scroll_frame_phase(
-          StateCommitted,
-          scroll_change.scroll_top,
-          scroll_change.scroll_left,
-        )
-      }
       match self.current_code_browser_data() {
         Some(browser) =>
           browser.cancel_horizontal_reveal_on_scroll(scroll_change)

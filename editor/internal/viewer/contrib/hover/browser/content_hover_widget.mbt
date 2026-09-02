@@ -872,7 +872,6 @@ extern "js" fn handle_hover_copy_click(event : @rdom.Event) -> Bool =
   #|   }
   #|   const row = button.closest(".hover-row");
   #|   const content = button.getAttribute("data-hover-copy") || row?.innerText || "";
-  #|   globalThis.__readonlyEditorCopiedText = content;
   #|   try {
   #|     const write = globalThis.navigator?.clipboard?.writeText;
   #|     if (typeof write === "function") {

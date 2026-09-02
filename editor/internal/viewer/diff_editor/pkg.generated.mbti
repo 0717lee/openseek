@@ -154,9 +154,6 @@ pub struct DiffEditorWidget {
   mut pending_original_scroll_left_echo : Double?
   mut pending_modified_scroll_top_echo : Double?
   mut pending_modified_scroll_left_echo : Double?
-  mut dispose_pass_count : Int
-  mut resize_observer_disposed : Bool
-  mut overview_ruler_disposed : Bool
   mut disposed : Bool
 }
 pub fn DiffEditorWidget::create(@dom.Element, services? : @code_editor_widget.CodeEditorServices, editor_options? : @code_editor_widget.CodeEditorOptions, options? : DiffEditorOptions, &@diff.DocumentDiffProvider) -> Self
@@ -170,7 +167,6 @@ pub fn DiffEditorWidget::get_model(Self) -> DiffEditorModelData?
 pub fn DiffEditorWidget::get_modified_vertical_reveal_bounds(Self, @common.Range) -> (Double, Double)?
 pub fn DiffEditorWidget::is_diff_up_to_date(Self) -> Bool
 pub fn DiffEditorWidget::layout(Self) -> Unit
-pub fn DiffEditorWidget::lifecycle_snapshot(Self) -> DiffEditorWidgetLifecycleSnapshot
 pub fn DiffEditorWidget::on_did_change_content_height(Self, (Double) -> Unit) -> @common.Disposable
 pub fn DiffEditorWidget::on_did_reveal_change(Self, (DiffEditorRevealEvent) -> Unit) -> @common.Disposable
 pub fn DiffEditorWidget::on_did_update_diff(Self, () -> Unit) -> @common.Disposable
@@ -184,31 +180,6 @@ pub fn DiffEditorWidget::set_diff_provider(Self, &@diff.DocumentDiffProvider) ->
 pub fn DiffEditorWidget::set_model(Self, DiffEditorModelData?) -> DiffEditorModelData?
 pub fn DiffEditorWidget::set_scroll_left(Self, Double) -> Unit
 pub fn DiffEditorWidget::update_options(Self, @code_editor_widget.CodeEditorOptions, DiffEditorOptions) -> Unit
-
-pub(all) struct DiffEditorWidgetLifecycleSnapshot {
-  kernel_count : Int
-  original_kernel_id : String
-  modified_kernel_id : String
-  kernels_are_distinct : Bool
-  view_model_count : Int
-  widget_disposed : Bool
-  dispose_pass_count : Int
-  original_kernel_disposed : Bool
-  modified_kernel_disposed : Bool
-  view_model_disposed : Bool
-  model_pair_is_committing : Bool
-  committed_model_generation : Int
-  overview_ruler_present : Bool
-  overview_ruler_disposed : Bool
-  inline_deleted_zone_count : Int
-  resize_observer_present : Bool
-  resize_observer_disposed : Bool
-  after_render_waiter_count : Int
-  after_render_remaining : Int
-  view_model_pending_scheduler_count : Int
-  diff_up_to_date : Bool
-  lifetime_subscription_count : Int
-}
 
 pub struct DiffMapping {
   line_range_mapping : @diff.DetailedLineRangeMapping

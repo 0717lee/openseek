@@ -152,11 +152,12 @@ fn run_diff_markdown_comments_test() -> Unit {
   })
   languages.set_tokens_provider("moonbit", @lang_moonbit.MoonBitTokenizer())
   |> ignore
-  let markdown_registration = languages.register_markdown_comment_provider(
+  languages.register_markdown_comment_provider(
     LanguageId("moonbit"),
     DiffMarkdownCommentProvider::{ },
     foldable=true,
   )
+  |> ignore
   let services = @viewer.ViewerServices(
     languages=languages.language_handle(log_service.log_handle()),
     log_service=log_service.log_handle(),
@@ -188,12 +189,13 @@ fn run_diff_markdown_comments_test() -> Unit {
     )
     diff_editor.layout()
   }
-  let content_height_subscription = diff_editor.on_did_change_content_height(content_height => {
+  diff_editor.on_did_change_content_height(content_height => {
     content_height_event_count.val += 1
     if auto_height_enabled.val {
       apply_content_height(content_height)
     }
   })
+  |> ignore
   let unchanged_original = diff_markdown_comment_model(
     "unchanged-original",
     diff_markdown_comment_unchanged_source(),
@@ -222,14 +224,10 @@ fn run_diff_markdown_comments_test() -> Unit {
     Some(DiffEditorModel(unchanged_original, unchanged_modified)),
   )
   |> ignore
-  let initial_hidden_original_comments = @support.query_count(
-    ".diff-markdown-comments-host .moonbit-diff-editor-original .moonbit-viewer-markdown-comment",
-  )
   host.set_attribute("style", "width:1100px;height:640px;")
   diff_editor.layout()
 
   install_diff_markdown_comments_controls(
-    initial_hidden_original_comments,
     fixture => {
       let pair : @viewer.DiffEditorModel = match fixture {
         "replacement" =>
@@ -259,41 +257,25 @@ fn run_diff_markdown_comments_test() -> Unit {
     },
     () => content_height_event_count.val,
     () => diff_editor.get_content_height(),
-    () => {
-      content_height_subscription.dispose()
-      diff_editor.dispose()
-      unchanged_original.dispose()
-      unchanged_modified.dispose()
-      replacement_original.dispose()
-      replacement_modified.dispose()
-      partial_original.dispose()
-      partial_modified.dispose()
-      markdown_registration.dispose()
-      services.dispose()
-    },
   )
 }
 
 ///|
 extern "js" fn install_diff_markdown_comments_controls(
-  initial_hidden_original_comments : Int,
   set_fixture : (String) -> Unit,
   set_layout : (String) -> Unit,
   resize : (Int) -> Unit,
   enable_auto_height : () -> Unit,
   content_height_event_count : () -> Int,
   content_height : () -> Double,
-  dispose : () -> Unit,
 ) -> Unit =
-  #| (initialHiddenOriginalComments, setFixture, setLayout, resize, enableAutoHeight, contentHeightEventCount, contentHeight, dispose) => {
+  #| (setFixture, setLayout, resize, enableAutoHeight, contentHeightEventCount, contentHeight) => {
   #|   globalThis.__diffMarkdownCommentsControls = Object.freeze({
-  #|     initialHiddenOriginalComments,
   #|     set_fixture: setFixture,
   #|     set_layout: setLayout,
   #|     resize,
   #|     enable_auto_height: enableAutoHeight,
   #|     content_height_event_count: contentHeightEventCount,
   #|     content_height: contentHeight,
-  #|     dispose,
   #|   });
   #| }

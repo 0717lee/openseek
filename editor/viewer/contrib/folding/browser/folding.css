@@ -46,4 +46,8 @@
 .cldr.codicon.codicon-folding-manual-expanded,
 .cldr.codicon.codicon-folding-manual-collapsed {
   color: var(--vscode-editorGutter-foldingControlForeground) !important;
+  /* The Viewer currently has one shared line-decoration lane. Keep a fold
+     control above the hover-only agent-feedback affordance when both occupy
+     the same line; feedback remains clickable on every non-folding line. */
+  z-index: 11;
 }

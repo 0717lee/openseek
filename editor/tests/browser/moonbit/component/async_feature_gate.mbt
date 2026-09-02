@@ -13,11 +13,13 @@ fn AsyncFeatureGate::AsyncFeatureGate() -> AsyncFeatureGate {
 }
 
 ///|
-async fn AsyncFeatureGate::wait(self : AsyncFeatureGate) -> String noraise {
-  @js.suspend((resolve : (String) -> Unit, _reject : (Error) -> Unit) => {
-    self.resolver = Some(resolve)
-  }) catch {
-    _ => "empty"
+async fn AsyncFeatureGate::wait(self : AsyncFeatureGate) -> String? noraise {
+  Some(
+    @js.suspend((resolve : (String) -> Unit, _reject : (Error) -> Unit) => {
+      self.resolver = Some(resolve)
+    }),
+  ) catch {
+    _ => None
   }
 }
 

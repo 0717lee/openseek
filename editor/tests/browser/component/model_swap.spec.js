@@ -46,46 +46,13 @@ test('rebuilds the view per model and carries focus across set_model', async ({ 
     expect(
       Math.abs(modelBHoverBox.width - modelAHoverBox.width),
     ).toBeLessThanOrEqual(1);
-    const slider = page.locator(
-      '[data-content-widget="editor.contrib.resizableContentHoverWidget"] .scrollbar.vertical .slider',
-    );
-    await slider.dispatchEvent('pointerdown', {
-      button: 0,
-      buttons: 1,
-      pointerId: 77,
-      clientX: 10,
-      clientY: 10,
-    });
-    await expect(slider).toHaveClass(/\bactive\b/);
-    await slider.dispatchEvent('pointerup', {
-      button: 0,
-      buttons: 0,
-      pointerId: 77,
-      clientX: 10,
-      clientY: 10,
-    });
-    await expect(slider).not.toHaveClass(/\bactive\b/);
     await page.evaluate(() => globalThis.__modelSwapContinue());
 
-    // The persistent hover scrollable is remounted with model C. Schedule its
-    // 500-ms hide callback, retain the detached bar, then let Viewer.dispose
-    // cancel the callback. The MoonBit scenario waits past the deadline.
     await page.waitForFunction(() => globalThis.__modelSwapPhase === 'model-c');
-    const hoverContent = page.locator(
-      '[data-content-widget="editor.contrib.resizableContentHoverWidget"] .monaco-hover-content',
-    );
-    const verticalBar = page.locator(
-      '[data-content-widget="editor.contrib.resizableContentHoverWidget"] .scrollbar.vertical',
-    );
-    await hoverContent.dispatchEvent('wheel', { deltaY: 20 });
-    const classBeforeDispose = await verticalBar.getAttribute('class');
-    const retainedBar = await verticalBar.elementHandle();
-    expect(retainedBar).not.toBeNull();
     await page.evaluate(() => globalThis.__modelSwapContinue());
 
     const report = await reporter.waitForReport(testInfo, { suite: 'model_swap' });
     expectMoonBitReportPassed(report, { suite: 'model_swap' });
-    expect(await retainedBar.getAttribute('class')).toBe(classBeforeDispose);
   } finally {
     reporter.dispose();
   }

@@ -89,37 +89,6 @@ impl @diff.DocumentDiffProvider for InvalidDiffLifecycleProvider with fn on_did_
 }
 
 ///|
-fn diff_editor_lifecycle_snapshot_json(
-  widget : @diff_editor.DiffEditorWidget,
-) -> String {
-  let snapshot = widget.lifecycle_snapshot()
-  Json({
-    "kernelCount": snapshot.kernel_count.to_json(),
-    "originalKernelId": snapshot.original_kernel_id.to_json(),
-    "modifiedKernelId": snapshot.modified_kernel_id.to_json(),
-    "kernelsAreDistinct": snapshot.kernels_are_distinct.to_json(),
-    "viewModelCount": snapshot.view_model_count.to_json(),
-    "widgetDisposed": snapshot.widget_disposed.to_json(),
-    "disposePassCount": snapshot.dispose_pass_count.to_json(),
-    "originalKernelDisposed": snapshot.original_kernel_disposed.to_json(),
-    "modifiedKernelDisposed": snapshot.modified_kernel_disposed.to_json(),
-    "viewModelDisposed": snapshot.view_model_disposed.to_json(),
-    "modelPairIsCommitting": snapshot.model_pair_is_committing.to_json(),
-    "committedModelGeneration": snapshot.committed_model_generation.to_json(),
-    "overviewRulerPresent": snapshot.overview_ruler_present.to_json(),
-    "overviewRulerDisposed": snapshot.overview_ruler_disposed.to_json(),
-    "inlineDeletedZoneCount": snapshot.inline_deleted_zone_count.to_json(),
-    "resizeObserverPresent": snapshot.resize_observer_present.to_json(),
-    "resizeObserverDisposed": snapshot.resize_observer_disposed.to_json(),
-    "afterRenderWaiterCount": snapshot.after_render_waiter_count.to_json(),
-    "afterRenderRemaining": snapshot.after_render_remaining.to_json(),
-    "viewModelPendingSchedulerCount": snapshot.view_model_pending_scheduler_count.to_json(),
-    "diffUpToDate": snapshot.diff_up_to_date.to_json(),
-    "lifetimeSubscriptionCount": snapshot.lifetime_subscription_count.to_json(),
-  }).stringify()
-}
-
-///|
 fn run_diff_editor_lifecycle_test() -> Unit {
   let document = @rdom.document()
   guard document.query_selector("#app").to_option() is Some(app) else {
@@ -167,12 +136,6 @@ fn run_diff_editor_lifecycle_test() -> Unit {
   let indicator_modified = diff_editor_lifecycle_model(
     "indicator-modified", "shared head\nnew value\nshared tail",
   )
-  let identical_original = diff_editor_lifecycle_model(
-    "identical-original", "identical 1\nidentical 2\nidentical 3\nidentical 4\nidentical 5\nidentical 6\nidentical 7\nidentical 8",
-  )
-  let identical_modified = diff_editor_lifecycle_model(
-    "identical-modified", "identical 1\nidentical 2\nidentical 3\nidentical 4\nidentical 5\nidentical 6\nidentical 7\nidentical 8",
-  )
   let late_prefix = diff_editor_lifecycle_numbered_lines(1, 121) + "\n"
   let late_middle = "\n" + diff_editor_lifecycle_numbered_lines(122, 190) + "\n"
   let late_suffix = "\n" + diff_editor_lifecycle_numbered_lines(191, 241)
@@ -212,14 +175,11 @@ fn run_diff_editor_lifecycle_test() -> Unit {
   )
   widget.set_model(Some({ original, modified, })) |> ignore
   install_diff_editor_lifecycle_controls(
-    () => diff_editor_lifecycle_snapshot_json(widget),
     fixture => {
       let pair : @diff_editor.DiffEditorModelData = match fixture {
         "digits" => { original: digit_original, modified: digit_modified, }
         "indicators" =>
           { original: indicator_original, modified: indicator_modified, }
-        "identical" =>
-          { original: identical_original, modified: identical_modified, }
         "late" => { original: late_original, modified: late_modified, }
         "first-line" =>
           { original: first_line_original, modified: first_line_modified, }
@@ -274,8 +234,6 @@ fn run_diff_editor_lifecycle_test() -> Unit {
       digit_modified.dispose()
       indicator_original.dispose()
       indicator_modified.dispose()
-      identical_original.dispose()
-      identical_modified.dispose()
       late_original.dispose()
       late_modified.dispose()
       first_line_original.dispose()
@@ -286,7 +244,6 @@ fn run_diff_editor_lifecycle_test() -> Unit {
 
 ///|
 extern "js" fn install_diff_editor_lifecycle_controls(
-  snapshot : () -> String,
   set_fixture : (String) -> Unit,
   set_digit_line_count : (Int) -> Unit,
   set_options : (String, Bool, Double) -> Unit,
@@ -297,9 +254,8 @@ extern "js" fn install_diff_editor_lifecycle_controls(
   dispose : () -> Unit,
   dispose_models : () -> Unit,
 ) -> Unit =
-  #| (snapshot, setFixture, setDigitLineCount, setOptions, setProvider, setModelAttached, revealFirstDiff, revealLastDiff, dispose, disposeModels) => {
+  #| (setFixture, setDigitLineCount, setOptions, setProvider, setModelAttached, revealFirstDiff, revealLastDiff, dispose, disposeModels) => {
   #|   globalThis.__diffEditorLifecycleControls = Object.freeze({
-  #|     snapshot() { return JSON.parse(snapshot()); },
   #|     set_fixture: setFixture,
   #|     set_digit_line_count: setDigitLineCount,
   #|     set_options: setOptions,

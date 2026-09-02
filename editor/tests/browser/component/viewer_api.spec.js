@@ -86,11 +86,25 @@ test('runs MoonBit viewer API component checks in the browser', async ({ page },
     });
     await page.mouse.up();
     await expect.poll(() => page.locator('.selected-text').count(), { timeout: 2_000 }).toBeGreaterThan(0);
+    const editorRoot = page.locator('.monaco-editor.readonly-editor');
+    await editorRoot.evaluate((root) => {
+      root.addEventListener(
+        'copy',
+        (event) => {
+          root.__testCopyPayload = {
+            plain: event.clipboardData?.getData('text/plain') ?? '',
+            html: event.clipboardData?.getData('text/html') ?? '',
+          };
+        },
+        { once: true },
+      );
+    });
     await page.keyboard.press('ControlOrMeta+C');
-    const copiedText = await page.evaluate(() => globalThis.__readonlyEditorCopiedText || '');
+    const { plain: copiedText, html: copiedHtml } = await editorRoot.evaluate(
+      (root) => root.__testCopyPayload,
+    );
     expect(copiedText).toContain('component_answer() -> Int');
     expect(copiedText).toContain('let really_l');
-    const copiedHtml = await page.evaluate(() => globalThis.__readonlyEditorCopiedHtml || '');
     // Monaco's getRichTextToCopy shape: a styled wrapper div with per-token
     // inline color styles from the token color map (viewModelImpl.ts:1051).
     expect(copiedHtml).toContain('white-space: pre;');

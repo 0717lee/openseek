@@ -19,11 +19,7 @@ dist-front-end:
 
 # Stage the browser-correctness scenario bundles into web/dist/browser-tests
 build-browser-tests: dist-front-end
-    moon run --target native scripts/build-browser-tests.mbtx -- smoke
-
-# Stage the perf scenarios plus the pinned Monaco oracle into web/dist/browser-tests
-build-browser-perf-tests: dist-front-end
-    moon run --target native scripts/build-browser-tests.mbtx -- perf
+    moon run --target native scripts/build-browser-tests.mbtx
 
 # Web assets and the preferred-target server artifact (moon build covers the server member)
 build: dist-front-end
@@ -87,6 +83,3 @@ test-browser-smoke: build build-browser-tests
 
 test-browser-component: build build-browser-tests
     ./node_modules/.bin/playwright test tests/browser/component
-
-test-browser-perf: build build-browser-perf-tests
-    ./node_modules/.bin/playwright test tests/browser/perf

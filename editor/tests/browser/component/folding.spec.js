@@ -34,9 +34,10 @@ test('folding: chevron click folds and unfolds, keyboard folds at cursor', async
     );
     await expect(expandedChevrons).toHaveCount(2);
 
-    // Fold the first region (lines 1-3). The chevrons sit at opacity 0 under
-    // showFoldingControls=mouseover; force past the visibility check.
-    await expandedChevrons.first().click({ force: true });
+    // Fold the first region (lines 1-3) through the same hover-reveal and
+    // trusted click path used by a user.
+    await expandedChevrons.first().hover();
+    await expandedChevrons.first().click();
 
     // Lines 2-3 leave the view axis; the second region is untouched.
     await expect(page.locator(editor)).not.toContainText('fold_child_a');

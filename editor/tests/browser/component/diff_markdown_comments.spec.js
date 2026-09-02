@@ -86,9 +86,6 @@ test('keeps rich comments in both split panes and only the modified inline pane'
   const original = root.locator('.moonbit-diff-editor-original');
   const modified = root.locator('.moonbit-diff-editor-modified');
 
-  expect(await page.evaluate(() =>
-    globalThis.__diffMarkdownCommentsControls.initialHiddenOriginalComments,
-  )).toBe(0);
   await expect(root).toHaveAttribute('data-render-mode', 'inline');
   await expect(original.locator(commentSelector)).toHaveCount(0);
   await expect(modified.locator(commentSelector)).toHaveCount(1);

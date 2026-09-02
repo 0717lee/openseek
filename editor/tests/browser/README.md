@@ -10,13 +10,11 @@ browser-suite authoring contracts.
 support/    Playwright fixtures, app helpers, logging, reporter
 smoke/      user workflows against the workbench or embedded viewer
 component/  loaders/assertions for direct MoonBit Viewer pages
-perf/       opt-in performance diagnostics and scroll-frame traces
 moonbit/    js-target MoonBit scenario packages
 ```
 
 `just test-browser-smoke` is the routine browser-correctness gate and runs both
-the `smoke/` and `component/` directories. `just test-browser-perf` is reserved
-for performance investigation and perf-harness changes.
+the `smoke/` and `component/` directories.
 
 - Smoke tests prefer real gestures and visible outcomes. Use helpers from
   `support/app.js`; do not call deterministic state-control globals when a
@@ -25,16 +23,16 @@ for performance investigation and perf-harness changes.
 - Component pages construct the public Viewer directly and report compact JSON
   through `__readonlyEditorBrowserTestReport`. Playwright validates the report,
   visible state, and feature-specific browser contracts and owns final
-  pass/fail. The shared harness records console messages, uncaught page errors,
-  failed requests, and HTTP responses at status 400 or above, but recording
-  those events alone does not fail a test; a spec must assert them when they are
-  part of its contract.
-- Component coverage is capped at 43 tests. Headless Viewer tests own model,
-  view-model, contribution, provider, cancellation, and event-order state.
-  Component Playwright owns attachment, node ownership, frame scheduling, and
-  behavior that requires Chromium layout, CSS, native input/focus, DOM Range,
-  iframe ownership, or a native animation frame. Root Viewer integration tests
-  do not install a fake DOM or create an intermediate mounted white-box layer.
+  pass/fail. The shared harness records console messages and fails a passing
+  test if it observed a console error, uncaught page error, failed request, or
+  HTTP response at status 400 or above.
+- Every component case must state a browser-only contract. Headless Viewer
+  tests own model, view-model, contribution, provider, cancellation, and
+  event-order state. Component Playwright owns attachment, node ownership,
+  frame scheduling, and behavior that requires Chromium layout, CSS, native
+  input/focus, DOM Range, iframe ownership, or a native animation frame. Root
+  Viewer integration tests do not install a fake DOM or create an intermediate
+  mounted white-box layer.
 - `component.html?browserGeometry=1` is the fixed geometry oracle: it embeds
   tiny self-owned monospace and proportional TTF data URLs, awaits
   `document.fonts.ready`, and runs at deviceScaleFactor 1. Its Playwright suite
@@ -66,22 +64,6 @@ for performance investigation and perf-harness changes.
   Markdown, and the `.mbt.md` pointer reaches native `moon ide hover`.
   `smoke/embed.spec.js` proves the same selection through the in-memory
   standalone embed with no workbench, remote protocol, or WebSocket.
-- Perf tests may enforce deterministic correctness contracts while attaching
-  structured timing evidence. `scroll_frame_parity.spec.js` wraps rAF before
-  either implementation loads, preserves raw state/render/mutation records,
-  groups callbacks by native timestamp, and correlates real
-  `.lines-content` `top`/`left` commits for local Viewer and pinned Monaco.
-  The local phases come from the internal Viewer-id seam, not the public API;
-  raw duplicates remain in the report and unmatched/coalesced states or
-  unmatched commits fail. Fixtures stay below Monaco's big-number translation
-  regime, so effective rail positions are `-top`/`-left`.
-  Cadence and dropped-frame summaries do not fail on a timing budget unless
-  one is explicitly documented.
-- Monaco parity normally belongs in ported MoonBit unit/reference tests, not
-  browser DOM snapshot comparison. The selected scroll commit-frame contract
-  is the narrow exception: it compares one real rail write source-relatively,
-  not general DOM structure or pixels.
-
 ## Stable selectors and observability
 
 - Shell: `.editor-shell` with `data-status`, `data-theme`, `data-line-count`,
@@ -101,23 +83,20 @@ for performance investigation and perf-harness changes.
   model/source/wire/range facts in `data-markdown-hover-*` attributes.
 - Definition navigation: a dedicated public-Viewer fixture drives plain clicks,
   Ctrl/Cmd definition links, goto, and Alt+F12 Peek with trusted browser input.
-  The four retained cases cover the HTML context menu, exact modifier-link
-  gesture, F4/Shift+F4/Escape inside shared Peek, and a projection-scoped
-  semantic-Markdown Peek with replacement teardown. Request identity,
-  cancellation, empty results, and provider ordering live in the owning
-  white-box suites.
+  Retained cases cover the HTML context menu, exact modifier-link gesture,
+  F4/Shift+F4/Escape inside shared Peek, and semantic-Markdown navigation,
+  overlay, focus, and replacement teardown. Request identity, query counts,
+  leases, cancellation, controller isolation, empty results, and provider
+  ordering live in the owning white-box suites.
 - Product observability: `__readonlyEditorEvent`, `__readonlyEditorModel`,
-  `__readonlyEditorDocument`, `__readonlyEditorSource`,
-  `__readonlyEditorCopiedText`, and `__readonlyEditorCopiedHtml`.
+  `__readonlyEditorDocument`, and `__readonlyEditorSource`. Copy assertions
+  observe the real `ClipboardEvent.clipboardData` or browser clipboard.
 - Reporter callback: `__readonlyEditorBrowserTestReport`; the Playwright
   reporter stores received payloads in `__readonlyEditorBrowserTestReports`.
 
 MoonBit scenarios are built by `scripts/build-browser-tests.mbtx` into
 `web/dist/browser-tests/`. A report has the shape
 `{"suite":"viewer_api","status":"passed","failures":[],"metrics":{}}`.
-Only the perf build requires the pinned VS Code checkout at
-`vscode/src/vs/editor/editor.main.ts`; the routine browser-correctness build
-does not build the Monaco oracle.
 
 Markdown diagnostic overlays assert the live resolved class/range/z-index
 policy and `showUnused` underline. They intentionally do not claim Code's
@@ -126,10 +105,9 @@ policy and `showUnused` underline. They intentionally do not claim Code's
 glyphs and are explicitly deferred for the readonly Markdown projection.
 
 `support/test.js` writes `runner.log` and a failure screenshot. Its page
-listeners record console/page/request/HTTP events for diagnosis; they do not
-apply a global fail-on-console, fail-on-page-error, fail-on-request, or
-fail-on-HTTP policy. Playwright retains traces and screenshots on failure, and
-component/perf reporters attach their compact JSON evidence under
+listeners make unexpected console/page/request/HTTP errors fail the current
+test instead of leaving a green run with a noisy log. Playwright retains traces
+and screenshots on failure, and component reporters attach compact JSON evidence under
 `test-results/browser/**`. Set `READONLY_EDITOR_TEST_VERBOSE=1` or
 `PW_VERBOSE=1` to mirror logs to the terminal.
 

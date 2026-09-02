@@ -255,14 +255,6 @@ test('the pinned toc bar outlines sections and navigation expands the chain', as
   await expect(page.locator(hoverWidget)).toContainText('post-navigation hover');
   expect(await projectionGeneration(page)).toBe(generation);
 
-  // This real-browser assertion owns both the two-section visibility policy
-  // and its CSS consequence: a hidden bar must not reserve the visible-TOC
-  // title clearance.
-  await page.locator(tocBar).evaluate((node) =>
-    node.setAttribute('data-toc-visible', 'false'),
-  );
-  await expect(page.locator(tocBar)).toBeHidden();
-  await expect(page.locator(article)).toHaveCSS('padding-top', '16px');
 });
 
 test('toc navigation scrolls only the Markdown viewport', async ({

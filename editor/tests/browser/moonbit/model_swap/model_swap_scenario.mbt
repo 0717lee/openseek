@@ -153,11 +153,12 @@ fn run_model_swap_test() -> Unit {
     )
     ctx.assert_true(
       @support.query_attribute(".viewer-host > .monaco-editor", "data-uri") ==
-      model_a.uri.to_string(),
+      Some(model_a.uri.to_string()),
       "data-uri not stamped for model A",
     )
     ctx.assert_true(
-      @support.query_attribute(".viewer-host", "data-mode-id") == "plaintext",
+      @support.query_attribute(".viewer-host", "data-mode-id") ==
+      Some("plaintext"),
       "data-mode-id not stamped on the container",
     )
     ctx.assert_true(
@@ -167,7 +168,7 @@ fn run_model_swap_test() -> Unit {
     ctx.assert_true(
       @support.query_count(".swap-overlay-second") == 1 &&
       @support.query_attribute(".swap-overlay-second", "widgetId") ==
-      "swap-overlay",
+      Some("swap-overlay"),
       "overlay widget missing or unstamped on model A",
     )
     install_model_swap_continue("model-a", () => {
@@ -182,7 +183,7 @@ fn run_model_swap_test() -> Unit {
         )
         ctx.assert_true(
           @support.query_attribute(".viewer-host > .monaco-editor", "data-uri") ==
-          model_b.uri.to_string(),
+          Some(model_b.uri.to_string()),
           "data-uri not restamped for model B",
         )
         ctx.assert_true(
@@ -217,7 +218,7 @@ fn run_model_swap_test() -> Unit {
               "a per-model view survived the detach",
             )
             ctx.assert_true(
-              @support.query_attribute(".viewer-host", "data-mode-id") == "",
+              @support.query_attribute(".viewer-host", "data-mode-id") is None,
               "data-mode-id survived the detach",
             )
             ctx.assert_true(
@@ -247,42 +248,36 @@ fn run_model_swap_test() -> Unit {
                 viewer.layout()
                 viewer.dispose()
                 viewer.dispose()
-                @support.set_timeout(
-                  () => {
-                    ctx.assert_true(
-                      @support.query_count(".viewer-host") == 1,
-                      "Viewer disposal removed the caller-owned host",
-                    )
-                    ctx.assert_true(
-                      @support.query_count(".viewer-host > .monaco-editor") == 0,
-                      "Viewer-owned DOM survived disposal or a cancelled frame",
-                    )
-                    ctx.assert_true(
-                      @support.query_count(".placeholder-host") == 1 &&
-                      @support.query_count(".placeholder-host > .monaco-editor") ==
-                      0,
-                      "placeholder DOM survived disposal or its host was removed",
-                    )
-                    ctx.assert_true(
-                      !model_c.is_disposed(),
-                      "Viewer disposal disposed the caller-owned model",
-                    )
-                    ctx.assert_true(
-                      @support.query_count(".swap-overlay-second") == 0 &&
-                      second_overlay_node.get_attribute("widgetId") ==
-                      Some("swap-overlay"),
-                      "Viewer disposal kept the overlay mounted or destroyed its node",
-                    )
-                    model_c.dispose()
-                    // The bundle owns the decorations adapter and default
-                    // feedback store; the retained marker store is disposed
-                    // only after that adapter has released its subscription.
-                    services.dispose()
-                    markers.dispose()
-                    ctx.finish()
-                  },
-                  600,
+                ctx.assert_true(
+                  @support.query_count(".viewer-host") == 1,
+                  "Viewer disposal removed the caller-owned host",
                 )
+                ctx.assert_true(
+                  @support.query_count(".viewer-host > .monaco-editor") == 0,
+                  "Viewer-owned DOM survived disposal",
+                )
+                ctx.assert_true(
+                  @support.query_count(".placeholder-host") == 1 &&
+                  @support.query_count(".placeholder-host > .monaco-editor") ==
+                  0,
+                  "placeholder DOM survived disposal or its host was removed",
+                )
+                ctx.assert_true(
+                  !model_c.is_disposed(),
+                  "Viewer disposal disposed the caller-owned model",
+                )
+                ctx.assert_true(
+                  @support.query_count(".swap-overlay-second") == 0 &&
+                  second_overlay_node.get_attribute("widgetId") ==
+                  Some("swap-overlay"),
+                  "Viewer disposal kept the overlay mounted or destroyed its node",
+                )
+                model_c.dispose()
+                // The bundle owns the decorations adapter and default feedback
+                // store; dispose it after its subscriptions leave the marker store.
+                services.dispose()
+                markers.dispose()
+                ctx.finish()
               })
             })
           })
@@ -306,14 +301,16 @@ fn wait_for_text(
   remaining : Int,
   body : () -> Unit,
 ) -> Unit {
-  if @support.query_text(".viewer-host").contains(needle) {
+  if @support.query_text(".viewer-host") is Some(text) && text.contains(needle) {
     body()
     return
   }
   if remaining <= 0 {
-    ctx.fail(
-      "timed out waiting for text: \{needle} (saw: \{@support.query_text(".viewer-host")})",
-    )
+    let saw = match @support.query_text(".viewer-host") {
+      Some(text) => text
+      None => "<missing viewer host>"
+    }
+    ctx.fail("timed out waiting for text: \{needle} (saw: \{saw})")
     ctx.finish()
     return
   }

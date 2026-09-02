@@ -42,21 +42,3 @@ fn CodeEditorWidget::emit_hover_resolved(
 ) -> Unit {
   @viewer_testing.publish_hover_resolved(self.get_id(), observation)
 }
-
-///|
-/// Emits the internal scroll/render trace without exposing it through the
-/// public CodeEditorWidget facade. `publish_scroll_frame` remains allocation-free when
-/// no browser-test/workbench listener is installed.
-fn CodeEditorWidget::emit_scroll_frame_phase(
-  self : CodeEditorWidget,
-  phase : @viewer_testing.ScrollFramePhase,
-  scroll_top : Double,
-  scroll_left : Double,
-) -> Unit {
-  @viewer_testing.publish_scroll_frame(
-    self.get_id(),
-    phase,
-    scroll_top,
-    scroll_left,
-  )
-}

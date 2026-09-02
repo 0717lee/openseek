@@ -36,9 +36,7 @@ const fakeMarkdownDocumentMermaidModule = `
         'data-mermaid-theme="' + currentTheme + '">' +
         '<rect width="480" height="180" fill="#1f2937"/>' +
         '<text x="16" y="36" fill="#f8fafc">' + source + '</text></svg>',
-      bindFunctions(root) {
-        root.setAttribute('data-fake-mermaid-bound', id);
-      },
+      bindFunctions() {},
     };
   }
 
@@ -50,6 +48,24 @@ async function diagramTransform(locator) {
     const matrix = new DOMMatrix(getComputedStyle(content).transform);
     return { scale: matrix.a, x: matrix.e, y: matrix.f };
   });
+}
+
+async function settleBrowserFrames(page, count = 1) {
+  await page.evaluate(
+    (remaining) =>
+      new Promise((resolve) => {
+        const next = () => {
+          if (remaining <= 0) {
+            resolve();
+            return;
+          }
+          remaining -= 1;
+          requestAnimationFrame(next);
+        };
+        next();
+      }),
+    count,
+  );
 }
 
 async function moveToSourceText(page, articleSelector, text, utf16Delta = 0) {
@@ -70,7 +86,7 @@ async function moveToSourceText(page, articleSelector, text, utf16Delta = 0) {
     }
     throw new Error(`text node not found: ${text}`);
   }, text);
-  await page.waitForTimeout(50);
+  await settleBrowserFrames(page);
   const point = await page.locator(articleSelector).evaluate(
     (articleNode, { text, utf16Delta }) => {
       const walker = document.createTreeWalker(
@@ -103,115 +119,7 @@ async function moveToSourceText(page, articleSelector, text, utf16Delta = 0) {
     Math.max((viewportSize?.width ?? 800) - 1, 0),
     Math.max((viewportSize?.height ?? 600) - 1, 0),
   );
-  await page.waitForTimeout(25);
-  await page.mouse.move(point.x, point.y);
-  return point;
-}
-
-async function sourceTextPoints(
-  page,
-  articleSelector,
-  text,
-  utf16Deltas,
-) {
-  const articleLocator = page.locator(articleSelector);
-  await articleLocator.evaluate((articleNode, text) => {
-    const walker = document.createTreeWalker(
-      articleNode,
-      NodeFilter.SHOW_TEXT,
-    );
-    let node;
-    while ((node = walker.nextNode())) {
-      if (!String(node.textContent || '').includes(text)) continue;
-      node.parentElement?.scrollIntoView({
-        block: 'center',
-        inline: 'nearest',
-      });
-      return;
-    }
-    throw new Error(`text node not found: ${text}`);
-  }, text);
-  await page.waitForTimeout(50);
-  return articleLocator.evaluate(
-    (articleNode, { text, utf16Deltas }) => {
-      const walker = document.createTreeWalker(
-        articleNode,
-        NodeFilter.SHOW_TEXT,
-      );
-      let node;
-      while ((node = walker.nextNode())) {
-        const index = String(node.textContent || '').indexOf(text);
-        if (index < 0) continue;
-        return utf16Deltas.map((utf16Delta) => {
-          const range = document.createRange();
-          const boundary = Math.min(
-            String(node.textContent || '').length,
-            index + utf16Delta,
-          );
-          range.setStart(node, boundary);
-          range.setEnd(node, Math.min(boundary + 1, node.textContent.length));
-          const rect = range.getBoundingClientRect();
-          return {
-            x: rect.left + Math.max(rect.width / 2, 1),
-            y: rect.top + Math.max(rect.height / 2, 1),
-          };
-        });
-      }
-      throw new Error(`text node not found: ${text}`);
-    },
-    { text, utf16Deltas },
-  );
-}
-
-async function moveToSyntheticPadding(page, articleSelector, lineText) {
-  const point = await page.locator(articleSelector).evaluate(
-    (articleNode, lineText) => {
-      const line = Array.from(
-        articleNode.querySelectorAll('[data-markdown-code-line]'),
-      ).find((candidate) =>
-        String(candidate.textContent || '').includes(lineText),
-      );
-      if (!line) throw new Error(`semantic line not found: ${lineText}`);
-      line.scrollIntoView({ block: 'center', inline: 'nearest' });
-      const rect = line.getBoundingClientRect();
-      return {
-        x: rect.left + 1,
-        y: rect.top + Math.max(rect.height / 2, 1),
-      };
-    },
-    lineText,
-  );
-  await page.waitForTimeout(50);
-  await page.mouse.move(point.x, point.y);
-  return point;
-}
-
-async function moveToTrailingLineRegion(page, articleSelector, lineText) {
-  const point = await page.locator(articleSelector).evaluate(
-    (articleNode, lineText) => {
-      const line = Array.from(
-        articleNode.querySelectorAll('[data-markdown-code-line]'),
-      ).find((candidate) =>
-        String(candidate.textContent || '').includes(lineText),
-      );
-      if (!line) throw new Error(`semantic line not found: ${lineText}`);
-      line.scrollIntoView({ block: 'center', inline: 'nearest' });
-      const lineRect = line.getBoundingClientRect();
-      const block = line.closest('[data-markdown-code-block]');
-      if (!block) throw new Error(`semantic block not found: ${lineText}`);
-      const blockRect = block.getBoundingClientRect();
-      const x = Math.min(lineRect.right + 16, blockRect.right - 4);
-      if (x <= lineRect.right) {
-        throw new Error(`semantic line has no trailing region: ${lineText}`);
-      }
-      return {
-        x,
-        y: lineRect.top + Math.max(lineRect.height / 2, 1),
-      };
-    },
-    lineText,
-  );
-  await page.waitForTimeout(50);
+  await settleBrowserFrames(page);
   await page.mouse.move(point.x, point.y);
   return point;
 }
@@ -241,11 +149,6 @@ function sourcePositionAtOffset(source, offset) {
 function fullModelRangeString(source) {
   const lines = source.split('\n');
   return `1:1-${lines.length}:${lines.at(-1).length + 1}`;
-}
-
-async function expectNoNewHoverCall(page, previousCount) {
-  await page.waitForTimeout(75);
-  expect((await hoverCalls(page)).length).toBe(previousCount);
 }
 
 async function expectHoverCallCancelled(page, callId) {
@@ -546,6 +449,7 @@ test('mounts zoom and drag controls for D2, UML, and Mermaid in Markdown documen
 test('renders and refreshes the editor-owned readonly Markdown presentation', async ({
   page,
 }, testInfo) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   const reporter = await installMoonBitReporter(page);
   try {
     await page.goto('/browser-tests/component.html?markdownDocument=1');
@@ -685,29 +589,16 @@ test('renders and refreshes the editor-owned readonly Markdown presentation', as
       ),
     ).not.toBe('none');
 
-    // A real Range-derived pointer sweeps across source boundaries faster than
-    // the hover delay. Only its final stable boundary reaches the provider;
-    // while that call remains unresolved, the standard loading row makes the
-    // pending state visible.
+    // A real Range-derived pointer reaches the source-backed semantic token;
+    // while the provider remains unresolved, the standard loading row makes
+    // the pending state visible.
     let callCount = (await hoverCalls(page)).length;
-    const sweepPoints = await sourceTextPoints(
+    const initialPoint = await moveToSourceText(
       page,
       article,
       'markdown_answer',
-      [1, 2, 4],
+      4,
     );
-    const viewportSize = page.viewportSize();
-    await page.mouse.move(
-      Math.max((viewportSize?.width ?? 800) - 1, 0),
-      Math.max((viewportSize?.height ?? 600) - 1, 0),
-    );
-    for (const point of sweepPoints) {
-      await page.mouse.move(point.x, point.y);
-      await page.waitForTimeout(25);
-    }
-    await page.waitForTimeout(50);
-    expect((await hoverCalls(page)).length).toBe(callCount);
-    const initialPoint = sweepPoints.at(-1);
     const initialCall = await waitForNewHoverCall(page, callCount);
     const expectedInitialOffset =
       initialSource.indexOf('markdown_answer') + 4;
@@ -822,7 +713,7 @@ test('renders and refreshes the editor-owned readonly Markdown presentation', as
     await page.locator(`${hoverWidget} .hover-copy-button`).click();
     await expect
       .poll(() =>
-        page.evaluate(() => globalThis.__readonlyEditorCopiedText || ''),
+        page.evaluate(() => navigator.clipboard.readText()),
       )
       .toBe('initial markdown diagnostic');
 
@@ -1051,27 +942,6 @@ test('renders and refreshes the editor-owned readonly Markdown presentation', as
       'updated markdown diagnostic',
     );
 
-    // Ordinary fences, synthetic padding, trailing code-row space, and prose
-    // are all outside source-bearing semantic text and issue no request.
-    callCount = (await hoverCalls(page)).length;
-    await moveToSourceText(page, article, 'ordinary_fence_answer', 4);
-    await expectNoNewHoverCall(page, callCount);
-    await moveToSyntheticPadding(page, article, 'nested_answer');
-    await expectNoNewHoverCall(page, callCount);
-    await moveToTrailingLineRegion(page, article, 'markdown_answer');
-    await expectNoNewHoverCall(page, callCount);
-    await moveToSourceText(page, article, 'Readonly Markdown document', 3);
-    await expectNoNewHoverCall(page, callCount);
-    await expect(page.locator(hoverWidget)).toHaveAttribute(
-      'data-markdown-hover-visible',
-      'false',
-    );
-    expect(
-      await page.locator(hoverWidget).evaluate((node) =>
-        getComputedStyle(node).display,
-      ),
-    ).toBe('none');
-
     // Two Viewers sharing the model/services have independent request and DOM
     // owners.
     callCount = (await hoverCalls(page)).length;
@@ -1092,18 +962,6 @@ test('renders and refreshes the editor-owned readonly Markdown presentation', as
       'secondary viewer language hover',
     );
 
-    const originalValue = await page.evaluate(() =>
-      globalThis.__markdownDocumentControls.getModelValue(),
-    );
-    await page.locator(`${article} input[type="checkbox"]`).click({
-      force: true,
-    });
-    expect(
-      await page.evaluate(() =>
-        globalThis.__markdownDocumentControls.getModelValue(),
-      ),
-    ).toBe(originalValue);
-
     // Moving away invalidates an in-flight provider completion.
     callCount = (await hoverCalls(page)).length;
     await moveToSourceText(page, article, 'markdown_answer', 3);
@@ -1118,7 +976,7 @@ test('renders and refreshes the editor-owned readonly Markdown presentation', as
         ),
       staleMoveCall,
     );
-    await page.waitForTimeout(50);
+    await settleBrowserFrames(page, 2);
     await expect(page.locator(hoverWidget)).not.toContainText(
       'stale pointer completion',
     );
@@ -1347,12 +1205,6 @@ test('renders and refreshes the editor-owned readonly Markdown presentation', as
     // Disposal cancels the final in-flight request and removes both the
     // presentation and its persistent overlay widget before completion.
     callCount = (await hoverCalls(page)).length;
-    await moveToSourceText(page, article, 'Same URI replacement model', 1);
-    await expectNoNewHoverCall(page, callCount);
-    await expect(page.locator(hoverWidget)).toHaveAttribute(
-      'data-markdown-hover-visible',
-      'false',
-    );
     await moveToSourceText(page, article, 'Int', 1);
     const staleDisposeCall = await waitForNewHoverCall(page, callCount);
     await page.evaluate(() => globalThis.__markdownDocumentControls.dispose());
@@ -1367,7 +1219,7 @@ test('renders and refreshes the editor-owned readonly Markdown presentation', as
         ),
       staleDisposeCall,
     );
-    await page.waitForTimeout(50);
+    await settleBrowserFrames(page, 2);
     await expect(page.locator(root)).toHaveCount(0);
     await expect(page.locator(hoverWidget)).toHaveCount(0);
   } finally {

@@ -16,10 +16,6 @@ just test-browser-smoke
 Run the subset relevant to each milestone; run all of them before declaring a
 cross-package or browser-visible implementation complete.
 
-`just test-browser-perf` is a diagnostic workflow, not a routine development
-gate. Run it when investigating a performance problem or changing scroll-frame,
-render-timing, or perf-harness behavior.
-
 ## Guardrails
 
 - Product code never imports `vscode/`, `codemirror/`, or the reference shell.

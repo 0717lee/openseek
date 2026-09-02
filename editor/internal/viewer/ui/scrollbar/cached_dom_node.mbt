@@ -162,30 +162,11 @@ pub fn CachedDomNode::set_contain(
 }
 
 ///|
-/// Per-property style write plus the scrollbar harness's unique metrics seam.
+/// Per-property style write after the caller's cached equality guard.
 fn set_cached_style_property(
   element : @rdom.Element,
   name : String,
   value : String,
 ) -> Unit {
   @base_browser.set_style_property(element, name, value)
-  record_cached_style_write(element, name)
 }
-
-///|
-/// When the browser conformance harness enables
-/// `__moonbitViewerScrollMetrics`, records the exact hot-path write without
-/// changing production behavior.
-extern "js" fn record_cached_style_write(
-  element : @rdom.Element,
-  name : String,
-) -> Unit =
-  #| (element, name) => {
-  #|   const metrics = globalThis.__moonbitViewerScrollMetrics;
-  #|   if (!metrics) return;
-  #|   metrics.styleWrites = (metrics.styleWrites || 0) + 1;
-  #|   const part = element.getAttribute('data-view-part') || element.className || element.tagName;
-  #|   const key = `${part}:${name}`;
-  #|   metrics.styleWritesByKey ||= {};
-  #|   metrics.styleWritesByKey[key] = (metrics.styleWritesByKey[key] || 0) + 1;
-  #| }

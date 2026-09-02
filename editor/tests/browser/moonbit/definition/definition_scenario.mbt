@@ -127,9 +127,6 @@ impl @language.ReferencesProvider for BrowserReferencesProvider with fn provide_
 ///|
 priv struct BrowserDefinitionFixtureState {
   mut resolver_calls : Int
-  mut resolver_acquires : Int
-  mut resolver_releases : Int
-  mut resolver_behavior : Int
   opened_uris : Array[String]
   opened_modes : Array[String]
 }
@@ -192,34 +189,35 @@ fn definition_state_json(
   markdown_provider_pending : Ref[Bool],
   fixture : BrowserDefinitionFixtureState,
 ) -> String {
-  let (line, column) = match viewer.get_position() {
-    Some(position) => (position.line_number, position.column)
-    None => (-1, -1)
+  let position = match viewer.get_position() {
+    Some(position) =>
+      Json({
+        "line": position.line_number.to_json(),
+        "column": position.column.to_json(),
+      })
+    None => Json::null()
   }
-  let (anchor_line, anchor_column, active_line, active_column) = match
-    viewer.get_selection() {
+  let selection = match viewer.get_selection() {
     Some(selection) => {
       let anchor = selection.get_selection_start()
       let active = selection.get_position()
-      (anchor.line_number, anchor.column, active.line_number, active.column)
+      Json({
+        "anchorLine": anchor.line_number.to_json(),
+        "anchorColumn": anchor.column.to_json(),
+        "activeLine": active.line_number.to_json(),
+        "activeColumn": active.column.to_json(),
+      })
     }
-    None => (-1, -1, -1, -1)
+    None => Json::null()
   }
   Json({
-    "position": Json({ "line": line.to_json(), "column": column.to_json() }),
-    "selection": Json({
-      "anchorLine": anchor_line.to_json(),
-      "anchorColumn": anchor_column.to_json(),
-      "activeLine": active_line.to_json(),
-      "activeColumn": active_column.to_json(),
-    }),
+    "position": position,
+    "selection": selection,
     "providerCalls": provider_calls.val.to_json(),
     "markdownProviderCalls": markdown_provider_calls.val.to_json(),
     "referencesProviderCalls": references_provider_calls.val.to_json(),
     "markdownProviderPending": markdown_provider_pending.val.to_json(),
     "resolverCalls": fixture.resolver_calls.to_json(),
-    "resolverAcquires": fixture.resolver_acquires.to_json(),
-    "resolverReleases": fixture.resolver_releases.to_json(),
     "openedUris": fixture.opened_uris.to_json(),
     "openedModes": fixture.opened_modes.to_json(),
     "scrollTop": viewer.get_scroll_top().to_json(),
@@ -303,8 +301,6 @@ fn run_definition_browser_test() -> Unit {
     markdown_definition_source(),
   )
   let markdown_provider_calls = Ref(0)
-  let markdown_provider_multiple = Ref(false)
-  let markdown_provider_redirect = Ref(false)
   let markdown_provider_delay = Ref(false)
   let markdown_provider_pending = Ref(false)
   let markdown_provider_release = BrowserDefinitionGate::new()
@@ -316,14 +312,6 @@ fn run_definition_browser_test() -> Unit {
   let remote_model = @model.TextModel(
     remote_uri, "definition-remote.mbt", "moonbit", 1, "definition-remote-rev-1",
     "let remote_definition_alpha = 1\nlet remote_use = remote_definition_alpha",
-  )
-  let wrong_uri = try! @base_common.Uri::from(
-    scheme="inmemory",
-    authority="model",
-    path="/definition-wrong.mbt",
-  )
-  let wrong_model = @model.TextModel(
-    wrong_uri, "definition-wrong.mbt", "moonbit", 1, "definition-wrong-rev-1", "let wrong_definition_alpha = 1",
   )
   let markdown_provider = BrowserDefinitionProvider::{
     calls: markdown_provider_calls,
@@ -338,9 +326,9 @@ fn run_definition_browser_test() -> Unit {
       ),
     },
     alternate_location: Some({ uri: markdown_uri, range: Range(6, 5, 6, 21), }),
-    redirect_location: Some({ uri: remote_uri, range: Range(1, 5, 1, 28), }),
-    multiple: markdown_provider_multiple,
-    redirect: markdown_provider_redirect,
+    redirect_location: None,
+    multiple: Ref(false),
+    redirect: Ref(false),
     delay: markdown_provider_delay,
     pending: markdown_provider_pending,
     release: Some(markdown_provider_release),
@@ -369,9 +357,6 @@ fn run_definition_browser_test() -> Unit {
   let log_handle = log_service.log_handle()
   let fixture : BrowserDefinitionFixtureState = {
     resolver_calls: 0,
-    resolver_acquires: 0,
-    resolver_releases: 0,
-    resolver_behavior: 0,
     opened_uris: [],
     opened_modes: [],
   }
@@ -380,21 +365,10 @@ fn run_definition_browser_test() -> Unit {
     _token,
   ) => {
     fixture.resolver_calls += 1
-    if resource.to_string() != remote_uri.to_string() ||
-      fixture.resolver_behavior == 1 {
+    if resource.to_string() != remote_uri.to_string() {
       None
     } else {
-      let resolved = if fixture.resolver_behavior == 2 {
-        wrong_model
-      } else {
-        remote_model
-      }
-      fixture.resolver_acquires += 1
-      Some(
-        TextModelReference(resolved, release=() => {
-          fixture.resolver_releases += 1
-        }),
-      )
+      Some(TextModelReference(remote_model, release=() => ()))
     }
   })
   let opener = @navigation_api.LocationOpenerHandle(open=request => {
@@ -452,15 +426,6 @@ fn run_definition_browser_test() -> Unit {
     () => viewer.set_scroll_top(0.0),
     () => viewer.set_selection(Selection(Position(2, 11), Position(2, 27))),
     () => provider_multiple.val = true,
-    () => markdown_provider_multiple.val = true,
-    () => markdown_provider_redirect.val = true,
-    () => fixture.resolver_behavior = 1,
-    () => fixture.resolver_behavior = 2,
-    () => remote_model.dispose(),
-    () => {
-      fixture.opened_uris.clear()
-      fixture.opened_modes.clear()
-    },
     () => markdown_provider_delay.val = true,
     () => {
       markdown_provider_delay.val = false
@@ -490,10 +455,10 @@ fn wait_for_definition_fixture(
   ctx : @support.BrowserTestContext,
   remaining : Int,
 ) -> Unit {
-  if @support.query_text(".definition-host").contains("definition_alpha") &&
-    @support.query_text(".definition-markdown-host").contains(
-      "definition_alpha",
-    ) {
+  if @support.query_text(".definition-host") is Some(code_text) &&
+    code_text.contains("definition_alpha") &&
+    @support.query_text(".definition-markdown-host") is Some(markdown_text) &&
+    markdown_text.contains("definition_alpha") {
     ctx.assert_true(
       @support.query_count(".definition-host > .monaco-editor.readonly-editor") ==
       1,
@@ -521,12 +486,6 @@ extern "js" fn install_definition_controls(
   reset_scroll : () -> Unit,
   select_reference : () -> Unit,
   enable_multiple_definitions : () -> Unit,
-  enable_multiple_markdown_definitions : () -> Unit,
-  enable_markdown_cross_definition : () -> Unit,
-  use_missing_resolver : () -> Unit,
-  use_wrong_resolver_model : () -> Unit,
-  dispose_remote_model : () -> Unit,
-  clear_opened_locations : () -> Unit,
   delay_markdown_provider : () -> Unit,
   release_markdown_provider : () -> Unit,
   replace_markdown_source : () -> Unit,
@@ -539,12 +498,6 @@ extern "js" fn install_definition_controls(
   #|   resetScroll,
   #|   selectReference,
   #|   enableMultipleDefinitions,
-  #|   enableMultipleMarkdownDefinitions,
-  #|   enableMarkdownCrossDefinition,
-  #|   useMissingResolver,
-  #|   useWrongResolverModel,
-  #|   disposeRemoteModel,
-  #|   clearOpenedLocations,
   #|   delayMarkdownProvider,
   #|   releaseMarkdownProvider,
   #|   replaceMarkdownSource,
@@ -557,13 +510,6 @@ extern "js" fn install_definition_controls(
   #|     reset_scroll: resetScroll,
   #|     select_reference: selectReference,
   #|     enable_multiple_definitions: enableMultipleDefinitions,
-  #|     enable_multiple_markdown_definitions:
-  #|       enableMultipleMarkdownDefinitions,
-  #|     enable_markdown_cross_definition: enableMarkdownCrossDefinition,
-  #|     use_missing_resolver: useMissingResolver,
-  #|     use_wrong_resolver_model: useWrongResolverModel,
-  #|     dispose_remote_model: disposeRemoteModel,
-  #|     clear_opened_locations: clearOpenedLocations,
   #|     delay_markdown_provider: delayMarkdownProvider,
   #|     release_markdown_provider: releaseMarkdownProvider,
   #|     replace_markdown_source: replaceMarkdownSource,

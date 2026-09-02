@@ -92,12 +92,6 @@ pub struct DiffEditorWidget {
   mut pending_original_scroll_left_echo : Double?
   mut pending_modified_scroll_top_echo : Double?
   mut pending_modified_scroll_left_echo : Double?
-  /// Internal, component-local lifecycle trace. It is exposed only through
-  /// the internal package diagnostic snapshot and never through a public
-  /// editor facade.
-  mut dispose_pass_count : Int
-  mut resize_observer_disposed : Bool
-  mut overview_ruler_disposed : Bool
   mut disposed : Bool
 }
 
@@ -250,9 +244,6 @@ pub fn DiffEditorWidget::create(
     pending_original_scroll_left_echo: None,
     pending_modified_scroll_top_echo: None,
     pending_modified_scroll_left_echo: None,
-    dispose_pass_count: 0,
-    resize_observer_disposed: false,
-    overview_ruler_disposed: false,
     disposed: false,
   }
   widget.install_event_bridges()
@@ -1059,18 +1050,11 @@ fn DiffEditorWidget::sync_overview_ruler_option(
     self.root.remove_attribute("data-overview-ruler")
     self.overview_root.set_attribute("hidden", "")
     match self.original_overview_ruler {
-      Some(ruler) => {
-        ruler.dispose()
-        self.overview_ruler_disposed = ruler.is_disposed()
-      }
+      Some(ruler) => ruler.dispose()
       None => ()
     }
     match self.modified_overview_ruler {
-      Some(ruler) => {
-        ruler.dispose()
-        self.overview_ruler_disposed = self.overview_ruler_disposed &&
-          ruler.is_disposed()
-      }
+      Some(ruler) => ruler.dispose()
       None => ()
     }
     self.original_overview_ruler = None
@@ -1103,7 +1087,6 @@ fn DiffEditorWidget::sync_overview_ruler_option(
     ruler.get_dom_node().set_attribute("data-diff-overview-side", "modified")
     self.modified_overview_ruler = Some(ruler)
   }
-  self.overview_ruler_disposed = false
   match self.diff_state {
     Some(diff_state) =>
       self.apply_overview_diff_state(diff_state, self.reconciling_generation)
@@ -1959,14 +1942,10 @@ pub fn DiffEditorWidget::dispose(self : DiffEditorWidget) -> Unit {
   if self.disposed {
     return
   }
-  self.dispose_pass_count += 1
   self.clear_diff_features_for_transition()
   self.disposed = true
   match self.resize_observer {
-    Some(observer) => {
-      observer.dispose()
-      self.resize_observer_disposed = true
-    }
+    Some(observer) => observer.dispose()
     None => ()
   }
   self.resize_observer = None
@@ -1978,18 +1957,11 @@ pub fn DiffEditorWidget::dispose(self : DiffEditorWidget) -> Unit {
   self.lifetime.clear()
   self.view_model.dispose()
   match self.original_overview_ruler {
-    Some(ruler) => {
-      ruler.dispose()
-      self.overview_ruler_disposed = ruler.is_disposed()
-    }
+    Some(ruler) => ruler.dispose()
     None => ()
   }
   match self.modified_overview_ruler {
-    Some(ruler) => {
-      ruler.dispose()
-      self.overview_ruler_disposed = self.overview_ruler_disposed &&
-        ruler.is_disposed()
-    }
+    Some(ruler) => ruler.dispose()
     None => ()
   }
   self.original_overview_ruler = None

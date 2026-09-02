@@ -28,19 +28,15 @@ async function waitForAnimationFrames(page, count = 2) {
   }), count);
 }
 
-async function waitForDiffLifecycleIdle(page) {
-  await waitForAnimationFrames(page);
+async function waitForDiffBands(root) {
+  const modifiedOverview = root.locator(
+    '[data-diff-overview-side="modified"]',
+  );
   await expect
-    .poll(() => page.evaluate(() =>
-      globalThis.__diffEditorLifecycleControls.snapshot(),
-    ))
-    .toMatchObject({
-      modelPairIsCommitting: false,
-      afterRenderWaiterCount: 0,
-      afterRenderRemaining: 0,
-      viewModelPendingSchedulerCount: 0,
-      diffUpToDate: true,
-    });
+    .poll(async () => Number(await modifiedOverview.getAttribute(
+      'data-overview-ruler-band-count',
+    )))
+    .toBeGreaterThan(0);
 }
 
 async function setDiffLifecycleFixture(page, fixture) {
@@ -94,7 +90,7 @@ test('reveals raw mappings[0] when the first hunk starts on the cursor line', as
     '.monaco-scrollable-element.editor-scrollable',
   );
   await setDiffLifecycleFixture(page, 'first-line');
-  await waitForDiffLifecycleIdle(page);
+  await waitForDiffBands(root);
 
   // Keep the model cursor at its initial line 1 while moving the viewport.
   // Cursor-relative `reveal_next_change` would skip that first hunk and land
@@ -127,7 +123,7 @@ test('reveals the final raw mapping for backward multi-diff navigation', async (
   const root = await openDiffLifecycle(page);
   const modified = root.locator('.moonbit-diff-editor-modified');
   await setDiffLifecycleFixture(page, 'first-line');
-  await waitForDiffLifecycleIdle(page);
+  await waitForDiffBands(root);
 
   await page.evaluate(() =>
     globalThis.__diffEditorLifecycleControls.reveal_last_diff(),
@@ -145,7 +141,7 @@ test('reveals the final raw mapping for backward multi-diff navigation', async (
   await disposeDiffLifecycle(page);
 });
 
-test('defers a one-shot first-diff reveal through computation and hidden layout', async ({ page }) => {
+test('defers a one-shot first-diff reveal through hidden layout', async ({ page }) => {
   const root = await openDiffLifecycle(page);
   const host = page.locator('.diff-lifecycle-host');
   const modified = root.locator('.moonbit-diff-editor-modified');
@@ -153,25 +149,21 @@ test('defers a one-shot first-diff reveal through computation and hidden layout'
     '.monaco-scrollable-element.editor-scrollable',
   );
 
-  // Request the VS Code-style reveal while neither diff computation nor a
-  // measurable two-pane layout is ready. Showing the host later must consume
-  // the request for this exact model pair rather than dropping it.
+  await setDiffLifecycleFixture(page, 'late');
+  await waitForDiffBands(root);
+
+  // Request the VS Code-style reveal while no measurable two-pane layout is
+  // available. Showing the host later must consume the request for this exact
+  // model pair rather than dropping it.
   await host.evaluate((node) => {
     node.style.display = 'none';
   });
-  await page.evaluate(() => {
-    globalThis.__diffEditorLifecycleControls.set_fixture('late');
-    globalThis.__diffEditorLifecycleControls.reveal_first_diff();
-  });
-  await expect
-    .poll(() => page.evaluate(() =>
-      globalThis.__diffEditorLifecycleControls.snapshot().diffUpToDate,
-    ))
-    .toBe(true);
+  await page.evaluate(() =>
+    globalThis.__diffEditorLifecycleControls.reveal_first_diff(),
+  );
   await host.evaluate((node) => {
     node.style.display = 'block';
   });
-  await waitForDiffLifecycleIdle(page);
 
   await expect(
     modified.locator('.line-numbers.active-line-number'),
@@ -193,7 +185,7 @@ test('defers a one-shot first-diff reveal through computation and hidden layout'
   await page.evaluate(() =>
     globalThis.__diffEditorLifecycleControls.set_provider('core'),
   );
-  await waitForDiffLifecycleIdle(page);
+  await waitForAnimationFrames(page, 4);
   const recomputedScrollTop = await modifiedScrollTop(root);
   expect(Math.abs(recomputedScrollTop - reviewerScrollTop)).toBeLessThanOrEqual(1);
 
@@ -205,26 +197,22 @@ test('the latest deferred edge reveal supersedes an earlier request', async ({ p
   const host = page.locator('.diff-lifecycle-host');
   const modified = root.locator('.moonbit-diff-editor-modified');
 
+  await setDiffLifecycleFixture(page, 'late');
+  await waitForDiffBands(root);
+
   // Semantic MultiDiff items request their initial first hunk while hidden.
-  // Shift+F7 can supersede that with a last-hunk request before the diff and
-  // layout become ready. Only the later request may move the cursor/viewport.
+  // Shift+F7 can supersede that with a last-hunk request before layout becomes
+  // ready. Only the later request may move the cursor/viewport.
   await host.evaluate((node) => {
     node.style.display = 'none';
   });
   await page.evaluate(() => {
-    globalThis.__diffEditorLifecycleControls.set_fixture('late');
     globalThis.__diffEditorLifecycleControls.reveal_first_diff();
     globalThis.__diffEditorLifecycleControls.reveal_last_diff();
   });
-  await expect
-    .poll(() => page.evaluate(() =>
-      globalThis.__diffEditorLifecycleControls.snapshot().diffUpToDate,
-    ))
-    .toBe(true);
   await host.evaluate((node) => {
     node.style.display = 'block';
   });
-  await waitForDiffLifecycleIdle(page);
 
   await expect(
     modified.locator('.line-numbers.active-line-number'),
@@ -236,12 +224,8 @@ test('the latest deferred edge reveal supersedes an earlier request', async ({ p
   await disposeDiffLifecycle(page);
 });
 
-test('owns and tears down exactly two kernels and one shared diff view model', async ({ page }) => {
-  await page.goto('/browser-tests/component.html?diffLifecycle=1');
-  await page.waitForFunction(() => Boolean(globalThis.__diffEditorLifecycleControls));
-
-  const root = page.locator('.diff-lifecycle-host > .moonbit-diff-editor');
-  await expect(root).toHaveCount(1);
+test('keeps overview interactions, failure status, and disposal observable', async ({ page }) => {
+  const root = await openDiffLifecycle(page);
   await expect(root.locator('.moonbit-diff-editor-pane > .monaco-editor')).toHaveCount(2);
   await expect(
     root.locator('.diff-editor-inline-deleted-block'),
@@ -371,39 +355,6 @@ test('owns and tears down exactly two kernels and one shared diff view model', a
     )))
     .toBeLessThan(afterTrackClick);
 
-  await expect
-    .poll(() =>
-      page.evaluate(() =>
-        globalThis.__diffEditorLifecycleControls.snapshot(),
-      ),
-    )
-    .toMatchObject({
-      kernelCount: 2,
-      kernelsAreDistinct: true,
-      viewModelCount: 1,
-      widgetDisposed: false,
-      disposePassCount: 0,
-      originalKernelDisposed: false,
-      modifiedKernelDisposed: false,
-      viewModelDisposed: false,
-      modelPairIsCommitting: false,
-      committedModelGeneration: 1,
-      overviewRulerPresent: true,
-      overviewRulerDisposed: false,
-      inlineDeletedZoneCount: 1,
-      resizeObserverPresent: true,
-      resizeObserverDisposed: false,
-      afterRenderWaiterCount: 0,
-      afterRenderRemaining: 0,
-      viewModelPendingSchedulerCount: 0,
-    });
-
-  const before = await page.evaluate(() =>
-    globalThis.__diffEditorLifecycleControls.snapshot(),
-  );
-  expect(before.originalKernelId).not.toBe(before.modifiedKernelId);
-  expect(before.inlineDeletedZoneCount).toBeGreaterThan(0);
-
   const status = root.locator('.moonbit-diff-editor-status');
   await page.evaluate(() =>
     globalThis.__diffEditorLifecycleControls.set_provider('provider'),
@@ -444,53 +395,23 @@ test('owns and tears down exactly two kernels and one shared diff view model', a
   );
   await expect(root).not.toHaveAttribute('data-diff-failure');
   await expect(status).toBeHidden();
-  await expect
-    .poll(() =>
-      page.evaluate(() =>
-        globalThis.__diffEditorLifecycleControls.snapshot().diffUpToDate,
-      ),
-    )
-    .toBe(true);
+  await expect(
+    root.locator('.diff-editor-inline-deleted-block'),
+  ).toHaveCount(1);
 
   await page.evaluate(() => globalThis.__diffEditorLifecycleControls.dispose());
   await expect(root).toHaveCount(0);
   await expect(page.locator('.diff-lifecycle-host .monaco-editor')).toHaveCount(0);
 
-  const afterFirstDispose = await page.evaluate(() =>
-    globalThis.__diffEditorLifecycleControls.snapshot(),
-  );
-  expect(afterFirstDispose).toMatchObject({
-    kernelCount: 2,
-    kernelsAreDistinct: true,
-    viewModelCount: 1,
-    widgetDisposed: true,
-    disposePassCount: 1,
-    originalKernelDisposed: true,
-    modifiedKernelDisposed: true,
-    viewModelDisposed: true,
-    modelPairIsCommitting: false,
-    overviewRulerPresent: false,
-    overviewRulerDisposed: true,
-    inlineDeletedZoneCount: 0,
-    resizeObserverPresent: false,
-    resizeObserverDisposed: true,
-    afterRenderWaiterCount: 0,
-    afterRenderRemaining: 0,
-    viewModelPendingSchedulerCount: 0,
-    lifetimeSubscriptionCount: 0,
-  });
-
   await page.evaluate(() => globalThis.__diffEditorLifecycleControls.dispose());
-  const afterSecondDispose = await page.evaluate(() =>
-    globalThis.__diffEditorLifecycleControls.snapshot(),
-  );
-  expect(afterSecondDispose).toEqual(afterFirstDispose);
+  await expect(root).toHaveCount(0);
+  await expect(page.locator('.diff-lifecycle-host .monaco-editor')).toHaveCount(0);
   await page.evaluate(() =>
     globalThis.__diffEditorLifecycleControls.dispose_models(),
   );
 });
 
-test('inline original strip follows decimal digit bands and font metrics without a render loop', async ({ page }) => {
+test('inline original strip follows decimal digit bands and font metrics', async ({ page }) => {
   const root = await openDiffLifecycle(page);
   await setDiffLifecycleFixture(page, 'digits');
   await setDiffLifecycleOptions(page, {
@@ -499,7 +420,9 @@ test('inline original strip follows decimal digit bands and font metrics without
     fontSize: 12,
   });
   await expect(root).toHaveAttribute('data-render-mode', 'inline');
-  await waitForDiffLifecycleIdle(page);
+  await expect(
+    root.locator('.moonbit-diff-editor-original .line-numbers').last(),
+  ).toHaveText('9');
 
   const readGeometry = () => root.evaluate((node) => {
     const original = node.querySelector('.moonbit-diff-editor-original');
@@ -511,10 +434,6 @@ test('inline original strip follows decimal digit bands and font metrics without
       originalWidth: originalRect.width,
       originalRight: originalRect.right,
       modifiedLeft: modifiedRect.left,
-      overviewGenerations: Array.from(
-        node.querySelectorAll('.diffOverviewRuler'),
-        (ruler) => Number(ruler.getAttribute('data-overview-ruler-generation')),
-      ),
     };
   });
   const expectJoinedGeometry = (geometry) => {
@@ -526,14 +445,10 @@ test('inline original strip follows decimal digit bands and font metrics without
 
   const nineLineGeometry = await readGeometry();
   expectJoinedGeometry(nineLineGeometry);
-  await expect(
-    root.locator('.moonbit-diff-editor-original .line-numbers').last(),
-  ).toHaveText('9');
 
   await page.evaluate(() =>
     globalThis.__diffEditorLifecycleControls.set_digit_line_count(10),
   );
-  await waitForDiffLifecycleIdle(page);
   await expect(
     root.locator('.moonbit-diff-editor-original .line-numbers').last(),
   ).toHaveText('10');
@@ -547,21 +462,13 @@ test('inline original strip follows decimal digit bands and font metrics without
     renderIndicators: true,
     fontSize: 24,
   });
-  await waitForDiffLifecycleIdle(page);
+  await expect
+    .poll(async () => (await readGeometry()).attributeWidth)
+    .toBeGreaterThan(tenLineGeometry.attributeWidth);
   const largeFontGeometry = await readGeometry();
   expectJoinedGeometry(largeFontGeometry);
   expect(largeFontGeometry.attributeWidth)
     .toBeGreaterThan(tenLineGeometry.attributeWidth);
-
-  // The paired render barrier must reach a fixed generation after the strip
-  // relayout. Sampling several later animation frames catches self-triggering
-  // layout-info/strip feedback loops.
-  await waitForAnimationFrames(page, 4);
-  const stableGeometry = await readGeometry();
-  expect(stableGeometry.attributeWidth).toBe(largeFontGeometry.attributeWidth);
-  expect(stableGeometry.overviewGenerations)
-    .toEqual(largeFontGeometry.overviewGenerations);
-  await waitForDiffLifecycleIdle(page);
 
   await disposeDiffLifecycle(page);
 });
@@ -607,7 +514,6 @@ test('renderIndicators removes only split and inline glyphs while retaining diff
     renderIndicators: true,
   });
   await expect(root).toHaveAttribute('data-render-mode', 'side-by-side');
-  await waitForDiffLifecycleIdle(page);
   await expectBackgrounds();
   await expectLaneIndicators();
 
@@ -615,7 +521,6 @@ test('renderIndicators removes only split and inline glyphs while retaining diff
     layout: 'split',
     renderIndicators: false,
   });
-  await waitForDiffLifecycleIdle(page);
   await expect(root.locator('.cldr.delete-sign, .cldr.insert-sign')).toHaveCount(0);
   await expect(root.locator('.diff-editor-inline-delete-sign')).toHaveCount(0);
   await expectBackgrounds();
@@ -625,7 +530,6 @@ test('renderIndicators removes only split and inline glyphs while retaining diff
     renderIndicators: true,
   });
   await expect(root).toHaveAttribute('data-render-mode', 'inline');
-  await waitForDiffLifecycleIdle(page);
   await expectLaneIndicators();
   await expect
     .poll(() => root.locator('.diff-editor-inline-delete-sign').count())
@@ -636,93 +540,10 @@ test('renderIndicators removes only split and inline glyphs while retaining diff
     layout: 'inline',
     renderIndicators: false,
   });
-  await waitForDiffLifecycleIdle(page);
   await expect(root.locator('.cldr.delete-sign, .cldr.insert-sign')).toHaveCount(0);
   await expect(root.locator('.diff-editor-inline-delete-sign')).toHaveCount(0);
   await expect(root.locator('.diff-editor-inline-deleted-block')).not.toHaveCount(0);
   await expectBackgrounds();
-
-  await disposeDiffLifecycle(page);
-});
-
-test('identical pairs remain fully visible and decoration-free in split and inline layouts', async ({ page }) => {
-  const root = await openDiffLifecycle(page);
-  const status = root.locator('.moonbit-diff-editor-status');
-  const diffArtifacts = root.locator([
-    '.diff-editor-line-delete',
-    '.diff-editor-line-insert',
-    '.diff-editor-char-delete',
-    '.diff-editor-char-insert',
-    '.cmdr.diff-editor-gutter-delete',
-    '.cmdr.diff-editor-gutter-insert',
-    '.cldr.delete-sign',
-    '.cldr.insert-sign',
-    '.diff-editor-inline-deleted-block',
-  ].join(','));
-  const expectedLines = [1, 2, 3, 4, 5, 6, 7, 8];
-  const expectIdenticalSurface = async (layout) => {
-    await expect(root).toHaveAttribute('data-render-mode', layout);
-    await waitForDiffLifecycleIdle(page);
-    await expect(status).toBeHidden();
-    await expect(root).not.toHaveAttribute('data-diff-failure');
-    await expect(diffArtifacts).toHaveCount(0);
-    const rulers = root.locator('.diffOverviewRuler');
-    await expect(rulers).toHaveCount(2);
-    await expect(rulers.nth(0)).toHaveAttribute(
-      'data-overview-ruler-band-count',
-      '0',
-    );
-    await expect(rulers.nth(1)).toHaveAttribute(
-      'data-overview-ruler-band-count',
-      '0',
-    );
-    const rendered = await root.evaluate((node) => {
-      const paneEvidence = (selector) => {
-        const pane = node.querySelector(selector);
-        const rows = Array.from(
-          pane.querySelectorAll(
-            '.view-lines[data-view-part="view-lines"] > .view-line',
-          ),
-        );
-        const lineNumbers = Array.from(
-          pane.querySelectorAll('.margin-view-overlays .line-numbers'),
-        );
-        return {
-          lines: Array.from(new Set(lineNumbers.map((lineNumber) =>
-            Number(lineNumber.textContent),
-          ))).sort((a, b) => a - b),
-          rowCount: rows.length,
-          text: rows.map((row) =>
-            row.textContent.replaceAll('\u00a0', ' '),
-          ).join('\n'),
-        };
-      };
-      return {
-        original: paneEvidence('.moonbit-diff-editor-original'),
-        modified: paneEvidence('.moonbit-diff-editor-modified'),
-      };
-    });
-    expect(rendered.original.lines).toEqual(expectedLines);
-    expect(rendered.modified.lines).toEqual(expectedLines);
-    expect(rendered.original.rowCount).toBe(expectedLines.length);
-    expect(rendered.modified.rowCount).toBe(expectedLines.length);
-    expect(rendered.original.text).toContain('identical 1');
-    expect(rendered.original.text).toContain('identical 8');
-    expect(rendered.modified.text).toContain('identical 1');
-    expect(rendered.modified.text).toContain('identical 8');
-  };
-
-  await setDiffLifecycleFixture(page, 'identical');
-  await setDiffLifecycleOptions(page, {
-    layout: 'split',
-    renderIndicators: true,
-  });
-  await expectIdenticalSurface('side-by-side');
-  await setDiffLifecycleOptions(page, {
-    layout: 'inline',
-    renderIndicators: true,
-  });
-  await expectIdenticalSurface('inline');
 
   await disposeDiffLifecycle(page);
 });

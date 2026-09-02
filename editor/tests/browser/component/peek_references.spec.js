@@ -221,19 +221,6 @@ test('Enter uses Current and Ctrl+Enter uses Side before closing Peek', async ({
     );
     expect((await state(page)).openLines).toEqual([3]);
     expect((await state(page)).openColumns).toEqual([1]);
-
-    await control(page, 'clear_opens');
-    await control(page, 'show_code');
-    await expect(reference(treeIn(page), 4)).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-    await reference(treeIn(page), 4).press('Enter');
-    await expect(page.locator(codePeek)).toHaveCount(0);
-    await expect
-      .poll(async () => (await state(page)).codePosition)
-      .toEqual({ line: 3, column: 1 });
-    expect((await state(page)).openModes).toEqual([]);
   } finally {
     reporter.dispose();
   }

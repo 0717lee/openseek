@@ -65,10 +65,6 @@ fn peek_references_state_json(
   code_viewer : @viewer.Viewer,
   state : PeekReferencesFixtureState,
 ) -> String {
-  let (code_line, code_column) = match code_viewer.get_position() {
-    Some(position) => (position.line_number, position.column)
-    None => (-1, -1)
-  }
   Json({
     "resolverCalls": state.resolver_calls.to_json(),
     "resolverAcquires": state.resolver_acquires.to_json(),
@@ -78,10 +74,6 @@ fn peek_references_state_json(
     "openUris": state.open_uris.to_json(),
     "openLines": state.open_lines.to_json(),
     "openColumns": state.open_columns.to_json(),
-    "codePosition": Json({
-      "line": code_line.to_json(),
-      "column": code_column.to_json(),
-    }),
     "codeHasTextFocus": code_viewer.has_text_focus().to_json(),
   }).stringify()
 }

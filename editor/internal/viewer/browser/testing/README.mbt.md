@@ -20,8 +20,7 @@ flowchart LR
 ```
 
 Observation records are constructed only while the matching Viewer has a
-listener, so an unobserved Viewer pays nothing. The scroll state/render-phase
-trace is disabled by default.
+listener, so an unobserved Viewer pays nothing.
 
 ```mbt nocheck
 // Browser test scenarios subscribe by Viewer id; product code never does.
@@ -36,16 +35,6 @@ are idempotent and generation-aware, so an old handle cannot remove a later
 registration that reuses the same id. Render observations intentionally omit
 diagnostic payloads; hosts that need diagnostics read them from their retained
 marker service.
-
-The scroll-frame seam preserves raw duplicate observations in order:
-`StateCommitted` after an accepted axis change is visible and before its render
-is requested, then `RenderStarted` and `RenderFinished` immediately around
-`View::render`. Each record carries Viewer id and both scroll axes. Viewer ids
-isolate streams; listener disposal, unregister, and registration replacement
-end the old stream. The publisher accepts primitives and checks
-`Emitter::has_listeners` before constructing a record, so product execution is
-disabled by default. Browser tests add the real DOM commit separately with a
-`MutationObserver`; an internal render phase is not itself commit evidence.
 
 ## Focused validation
 

@@ -27,16 +27,17 @@ async function mountGeometry(page, testInfo) {
   return reporter;
 }
 
-async function settle(page, delay = 230) {
+async function settle(page) {
   await page.evaluate(
     () =>
       new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => requestAnimationFrame(resolve)),
+          ),
+        ),
       ),
   );
-  if (delay > 0) {
-    await page.waitForTimeout(delay);
-  }
 }
 
 async function state(page, font, line = 3, column = 6) {
@@ -318,7 +319,7 @@ test('DOM ranges public caret positions and content-widget anchors agree within 
 
       await control(page, 'set_position', font, 3, 6);
       await control(page, 'focus', font);
-      await settle(page, 0);
+      await settle(page);
       const cursor = page.locator(`${hostSelector(font)} .cursor`).first();
       await expect(cursor).toBeVisible();
       const cursorRect = await cursor.boundingBox();
@@ -592,7 +593,8 @@ test('fold-generated ellipsis participates in measured line width', async ({
       `${hostSelector('monospace')} .cldr.codicon-folding-expanded`,
     );
     await expect(expanded).toHaveCount(1);
-    await expanded.click({ force: true });
+    await expanded.hover();
+    await expanded.click();
     const generated = header.locator('.inline-folded');
     await expect(generated).toHaveCount(1);
     const afterWidth = await header.locator('.view-line-content').evaluate(
@@ -606,7 +608,8 @@ test('fold-generated ellipsis participates in measured line width', async ({
     const collapsed = page.locator(
       `${hostSelector('monospace')} .cldr.codicon-folding-collapsed`,
     );
-    await collapsed.click({ force: true });
+    await collapsed.hover();
+    await collapsed.click();
     await expect(header.locator('.inline-folded')).toHaveCount(0);
     expectNear(
       await header.locator('.view-line-content').evaluate((node) => node.offsetWidth),

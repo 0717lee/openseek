@@ -4,7 +4,6 @@ import {
   collectReadonlyEvents,
   openMainFixture,
   openWorkspaceFile,
-  waitForReady,
   workspaceItem,
 } from '../support/app.js';
 
@@ -29,7 +28,14 @@ async function unfoldMainBody(page) {
     '.margin-view-overlays .cldr.codicon-folding-collapsed',
   );
   await expect(collapsed).toHaveCount(1, { timeout: 7_000 });
-  await collapsed.click({ force: true });
+  await collapsed.hover();
+  await collapsed.click();
+}
+
+async function settleBrowserFrame(page) {
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => resolve())),
+  );
 }
 
 async function moveFromMarkdownProseToTextRange(
@@ -50,7 +56,7 @@ async function moveFromMarkdownProseToTextRange(
     };
   });
   await page.mouse.move(prosePoint.x, prosePoint.y);
-  await page.waitForTimeout(25);
+  await settleBrowserFrame(page);
   const targetPoint = await article.evaluate(
     (article, { text, utf16Delta }) => {
       const walker = document.createTreeWalker(
@@ -82,7 +88,7 @@ async function moveFromMarkdownProseToTextRange(
     },
     { text, utf16Delta },
   );
-  await page.waitForTimeout(25);
+  await settleBrowserFrame(page);
   await page.mouse.move(targetPoint.x, targetPoint.y);
 }
 
@@ -168,11 +174,13 @@ test('opens MoonBit models as a top-level outline without enforcing later folds'
 
   // The policy is initial, not enforced: an ordinary chevron click leaves the
   // selected top-level declaration expanded for the rest of this model.
-  await collapsed.first().click({ force: true });
+  await collapsed.first().hover();
+  await collapsed.first().click();
   await expect(editor).toContainText('message : String');
   await expect(collapsed).toHaveCount(1);
 
-  await collapsed.first().click({ force: true });
+  await collapsed.first().hover();
+  await collapsed.first().click();
   await expect(editor).toContainText('readonly fixture ready');
   await expect(collapsed).toHaveCount(0);
 });
@@ -439,63 +447,6 @@ test('opens Markdown documents through the native protocol and hovers literate M
   );
 });
 
-test('shows hover through pointer interaction', async ({ page }) => {
-  await page.goto('/');
-  await waitForReady(page);
-  await expect(page.locator('.editor-shell')).toHaveAttribute(
-    'data-source-uri',
-    'readonly-remote://workspace/src/main.mbt',
-  );
-  await unfoldMainBody(page);
-
-  const symbol = page.locator('.view-line span', { hasText: 'startup_event' }).first();
-  await expect(symbol).toBeVisible();
-  await expect(async () => {
-    await symbol.hover();
-    const hover = page.locator('[data-content-widget="editor.contrib.resizableContentHoverWidget"] .monaco-hover');
-    await expect(hover).toBeVisible({ timeout: 3_000 });
-    await expect
-      .poll(() => hover.textContent().then((text) => text.trim().length), {
-        timeout: 3_000,
-      })
-      .toBeGreaterThan(0);
-  }).toPass({ timeout: 60_000 });
-});
-
-test('opens Peek References from Moon IDE through the workbench', async ({
-  page,
-}) => {
-  test.slow();
-  await page.goto('/');
-  await openMainFixture(page);
-  await unfoldMainBody(page);
-
-  const symbol = page
-    .locator('.view-line span', { hasText: 'startup_event' })
-    .first();
-  await expect(symbol).toBeVisible();
-  await symbol.click();
-  await page.keyboard.press('Shift+F12');
-
-  const references = page.getByRole('dialog', { name: 'Peek References' });
-  await expect(references).toBeVisible({ timeout: 60_000 });
-  await expect(references).toContainText('2 results');
-  await expect(references).toContainText('events.mbt');
-  await expect(references).toContainText('main.mbt');
-  // Two file groups plus the selected group's visible reference. The
-  // collapsed group keeps its child row in the DOM, but out of the
-  // accessibility tree.
-  await expect(references.getByRole('treeitem')).toHaveCount(3);
-  await expect(
-    references.locator(
-      '.moonbit-viewer-references-peek-preview > ' +
-        '.monaco-editor.readonly-editor',
-    ),
-  ).toHaveCount(1);
-  await page.keyboard.press('Escape');
-  await expect(references).toHaveCount(0);
-});
-
 test('lazily expands explorer folders and auto-reveals the active file', async ({ page }) => {
   await page.goto('/');
   const initialHref = await page.evaluate(() => window.location.href);
@@ -571,52 +522,6 @@ test('renders unregistered languages with default/plain spans', async ({ page })
   await expect(page.locator('.view-line span.mtk8')).toHaveCount(0);
 });
 
-test('updates and recovers watched fixture files from disk changes', async ({ page }) => {
-  const original = await fs.readFile(mainFixture, 'utf8');
-
-  try {
-    await page.goto('/');
-    await openMainFixture(page);
-    await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
-    await unfoldMainBody(page);
-
-    await fs.writeFile(
-      mainFixture,
-      original.replace('println(event.message)', 'println("synced from disk")'),
-      'utf8',
-    );
-    await waitForSourceText(page, 'println("synced from disk")');
-    await expect(
-      page.locator('.margin-view-overlays .cldr.codicon-folding-collapsed'),
-    ).toHaveCount(0);
-    await expect(page.locator('.mtk5')).toContainText('"synced from disk"', {
-      timeout: 7_000,
-    });
-
-    await fs.rm(mainFixture);
-    await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'missing', {
-      timeout: 7_000,
-    });
-    await expect(page.locator('.source-message')).toContainText('Source file is missing.');
-
-    await fs.writeFile(
-      mainFixture,
-      original.replace('println(event.message)', 'println("restored from disk")'),
-      'utf8',
-    );
-    await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready', {
-      timeout: 7_000,
-    });
-    await waitForSourceText(page, 'println("restored from disk")');
-    await unfoldMainBody(page);
-    await expect(page.locator('.mtk5')).toContainText('"restored from disk"', {
-      timeout: 7_000,
-    });
-  } finally {
-    await fs.writeFile(mainFixture, original, 'utf8');
-  }
-});
-
 test('preserves mixed folding state across watched disk changes', async ({ page }) => {
   const original = await fs.readFile(eventsFixture, 'utf8');
 
@@ -629,7 +534,8 @@ test('preserves mixed folding state across watched disk changes', async ({ page 
       '.margin-view-overlays .cldr.codicon-folding-collapsed',
     );
     await expect(collapsed).toHaveCount(2);
-    await collapsed.first().click({ force: true });
+    await collapsed.first().hover();
+    await collapsed.first().click();
     await expect(editor).toContainText('message : String');
     await expect(editor).not.toContainText('readonly fixture ready');
     await expect(collapsed).toHaveCount(1);

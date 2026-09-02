@@ -1,8 +1,6 @@
 import {
   "moonbitlang/async",
   "moonbitlang/async/fs",
-  "moonbitlang/async/process",
-  "moonbitlang/core/env",
 }
 
 ///|
@@ -53,20 +51,6 @@ fn smoke_bundles() -> Array[BrowserBundle] {
     BrowserBundle::{
       name: "peek_references",
       title: "MoonBit Viewer Peek References Test",
-    },
-  ]
-}
-
-///|
-fn perf_bundles() -> Array[BrowserBundle] {
-  [
-    BrowserBundle::{
-      name: "component",
-      title: "MoonBit Viewer Component Test",
-    },
-    BrowserBundle::{
-      name: "perf",
-      title: "MoonBit Viewer Performance Test",
     },
   ]
 }
@@ -145,59 +129,8 @@ async fn write_browser_bundle(
 }
 
 ///|
-async fn build_monaco_oracle(browser_tests_dir : String) -> Unit {
-  let monaco_entry = "vscode/src/vs/editor/editor.main.ts"
-  if !@fs.exists(monaco_entry) {
-    fail(
-      "browser perf build requires the pinned VS Code checkout at " +
-      monaco_entry,
-    )
-  }
-  // Build a browser-runnable oracle directly from the pinned VS Code
-  // submodule. It is perf-only and lets the frame suite compare identical
-  // traces without relying on a separately versioned monaco-editor package.
-  let status = @process.run("./node_modules/.bin/esbuild", [
-    monaco_entry,
-    "--bundle",
-    "--format=esm",
-    "--platform=browser",
-    "--target=es2022",
-    "--outfile=" + browser_tests_dir + "/monaco-oracle.mjs",
-    "--loader:.svg=dataurl",
-    "--loader:.png=dataurl",
-    "--loader:.ttf=dataurl",
-    "--external:./codicon.ttf",
-    "--log-level=warning",
-  ])
-  if status != 0 {
-    fail(
-      "pinned Monaco oracle build failed with exit code " + status.to_string(),
-    )
-  }
-  @fs.write_file(
-    browser_tests_dir + "/monaco-oracle.html",
-    monaco_oracle_html(),
-    create_mode=@fs.CreateOrTruncate,
-  )
-  @fs.write_file(
-    browser_tests_dir + "/codicon.ttf",
-    @fs.read_file("viewer/browser/view/codicon/codicon.ttf"),
-    create_mode=@fs.CreateOrTruncate,
-  )
-}
-
-///|
 async fn main {
-  let args = @env.args()
-  let profile = if args.length() > 1 { args[1] } else { "smoke" }
-  let bundles = if profile == "smoke" {
-    smoke_bundles()
-  } else if profile == "perf" {
-    perf_bundles()
-  } else {
-    fail("unknown browser test build profile: \{profile}; expected smoke or perf")
-  }
-
+  let bundles = smoke_bundles()
   let build_dir = resolved_browser_build_dir(bundles)
   let browser_tests_dir = "web/dist/browser-tests"
   if !@fs.exists(browser_tests_dir) {
@@ -206,12 +139,7 @@ async fn main {
   for bundle in bundles {
     write_browser_bundle(bundle, build_dir, browser_tests_dir)
   }
-  if profile == "perf" {
-    build_monaco_oracle(browser_tests_dir)
-  }
-  println(
-    "Generated \{profile} browser test bundles under web/dist/browser-tests",
-  )
+  println("Generated browser test bundles under web/dist/browser-tests")
 }
 
 ///|
@@ -231,22 +159,5 @@ fn browser_test_html(title : String, script_src : String) -> String {
     $|    <script type="module" src="\{script_src}"></script>
     $|  </body>
     $|</html>
-  )
-}
-
-///|
-fn monaco_oracle_html() -> String {
-  (
-    #|<!doctype html>
-    #|<html lang="en">
-    #|  <head>
-    #|    <meta charset="UTF-8" />
-    #|    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    #|    <title>Pinned Monaco Scroll Oracle</title>
-    #|    <link rel="stylesheet" href="/browser-tests/monaco-oracle.css">
-    #|    <style>html,body,#monaco-host{margin:0;width:100%;height:100%;overflow:hidden}</style>
-    #|  </head>
-    #|  <body><div id="monaco-host"></div></body>
-    #|</html>
   )
 }

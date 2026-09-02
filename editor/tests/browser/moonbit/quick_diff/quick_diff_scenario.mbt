@@ -68,7 +68,7 @@ fn wait_for_text(
   needle : String,
   remaining : Int,
 ) -> Unit {
-  if @support.query_text(".viewer-host").contains(needle) {
+  if @support.query_text(".viewer-host") is Some(text) && text.contains(needle) {
     let added = @support.query_count(
       ".margin-view-overlays .cldr.dirty-diff-added",
     )
@@ -97,9 +97,11 @@ fn wait_for_text(
     return
   }
   if remaining <= 0 {
-    ctx.fail(
-      "timed out waiting for text: \{needle} (saw: \{@support.query_text(".viewer-host")})",
-    )
+    let saw = match @support.query_text(".viewer-host") {
+      Some(text) => text
+      None => "<missing viewer host>"
+    }
+    ctx.fail("timed out waiting for text: \{needle} (saw: \{saw})")
     ctx.finish()
     return
   }

@@ -6,7 +6,7 @@ priv struct MarkdownDocumentHoverCall {
   offset : Int
   token : @language.CancellationToken
   gate : AsyncFeatureGate
-  mut outcome : String
+  mut outcome : String?
 }
 
 ///|
@@ -22,7 +22,10 @@ fn MarkdownDocumentHoverCall::to_json(self : MarkdownDocumentHoverCall) -> Json 
     "column": self.position.column.to_json(),
     "offset": self.offset.to_json(),
     "cancelled": self.token.is_cancellation_requested().to_json(),
-    "outcome": self.outcome.to_json(),
+    "outcome": match self.outcome {
+      Some(outcome) => outcome.to_json()
+      None => Json::null()
+    },
   })
 }
 
@@ -51,7 +54,7 @@ fn MarkdownDocumentHoverHarness::begin(
     offset: model.get_offset_at(position),
     token,
     gate: AsyncFeatureGate(),
-    outcome: "",
+    outcome: None,
   }
   self.next_id.val += 1
   self.calls.push(call)
@@ -72,10 +75,10 @@ fn MarkdownDocumentHoverHarness::release(
   outcome : String,
 ) -> Bool {
   for call in self.calls {
-    if call.id == call_id && call.outcome == "" {
+    if call.id == call_id && call.outcome is None {
       let released = call.gate.release(outcome)
       if released {
-        call.outcome = outcome
+        call.outcome = Some(outcome)
       }
       return released
     }
@@ -96,10 +99,7 @@ impl @language.HoverProvider for MarkdownDocumentHoverProvider with fn provide_h
   token,
 ) {
   let call = self.harness.begin(model, position, token)
-  let outcome = call.gate.wait()
-  if outcome == "empty" {
-    return None
-  }
+  guard call.gate.wait() is Some(outcome) else { return None }
   let range = if outcome.has_prefix("wide:") {
     model.get_full_model_range()
   } else {
@@ -510,14 +510,14 @@ fn poll_markdown_document_ready(
       @support.query_attribute(
         ".markdown-document-host [data-markdown-code-block]", "data-markdown-semantic",
       ) ==
-      "moonbit-check",
+      Some("moonbit-check"),
       "compiler-compatible .mbt.md fence was not classified semantically",
     )
     ctx.assert_true(
       @support.query_attribute(
         ".markdown-document-host > .moonbit-viewer-markdown-document", "data-source-uri",
       ) ==
-      model.uri.to_string(),
+      Some(model.uri.to_string()),
       "Markdown root lost the original source URI",
     )
     ctx.assert_true(
@@ -533,12 +533,13 @@ fn poll_markdown_document_ready(
     ctx.metric_int("semanticLines", semantic_lines)
     ctx.metric_int("phraseDividers", phrase_dividers)
     ctx.metric_int("diagnostics", diagnostics)
-    ctx.metric_string(
-      "sourceUri",
+    match
       @support.query_attribute(
         ".markdown-document-host > .moonbit-viewer-markdown-document", "data-source-uri",
-      ),
-    )
+      ) {
+      Some(source_uri) => ctx.metric_string("sourceUri", source_uri)
+      None => ()
+    }
     ctx.finish()
   } else if remaining <= 0 {
     ctx.fail(

@@ -83,7 +83,11 @@ export async function withLoggedOperation(logger, category, message, operation) 
 }
 
 export function installPageLogging(page, logger) {
+  const failures = [];
   const onConsole = (message) => {
+    if (message.type() === 'error') {
+      failures.push(`console error: ${message.text()}`);
+    }
     logger.log({
       level: consoleLevel(message.type()),
       category: 'browser.console',
@@ -92,6 +96,7 @@ export function installPageLogging(page, logger) {
     });
   };
   const onPageError = (error) => {
+    failures.push(`page error: ${error?.message || String(error)}`);
     logger.log({
       level: 'error',
       category: 'browser.pageError',
@@ -100,6 +105,9 @@ export function installPageLogging(page, logger) {
     });
   };
   const onRequestFailed = (request) => {
+    failures.push(
+      `request failed: ${request.method()} ${request.url()} (${request.failure()?.errorText || 'unknown error'})`,
+    );
     logger.log({
       level: 'warning',
       category: 'browser.requestFailed',
@@ -112,6 +120,7 @@ export function installPageLogging(page, logger) {
   };
   const onResponse = (response) => {
     if (response.status() >= 400) {
+      failures.push(`HTTP ${response.status()}: ${response.url()}`);
       logger.log({
         level: 'warning',
         category: 'browser.http',
@@ -124,11 +133,22 @@ export function installPageLogging(page, logger) {
   page.on('pageerror', onPageError);
   page.on('requestfailed', onRequestFailed);
   page.on('response', onResponse);
-  return () => {
-    page.off('console', onConsole);
-    page.off('pageerror', onPageError);
-    page.off('requestfailed', onRequestFailed);
-    page.off('response', onResponse);
+  return {
+    assertClean() {
+      if (failures.length === 0) return;
+      const displayed = failures.slice(0, 10);
+      const remainder = failures.length - displayed.length;
+      const suffix = remainder > 0 ? `\n... and ${remainder} more` : '';
+      throw new Error(
+        `Unexpected browser errors:\n${displayed.map((failure) => `- ${failure}`).join('\n')}${suffix}`,
+      );
+    },
+    remove() {
+      page.off('console', onConsole);
+      page.off('pageerror', onPageError);
+      page.off('requestfailed', onRequestFailed);
+      page.off('response', onResponse);
+    },
   };
 }
 
