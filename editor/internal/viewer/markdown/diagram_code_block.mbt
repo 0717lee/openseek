@@ -74,7 +74,7 @@ fn viewer_uml_color_scheme() -> @uml_style.ColorScheme {
   let muted = "var(--vscode-descriptionForeground, #6e7781)"
   let surface = "var(--vscode-editorWidget-background, var(--vscode-editor-background, #ffffff))"
   let note_surface = "var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, #fff8c5))"
-  @uml_style.ColorScheme(
+  ColorScheme(
     foreground,
     foreground,
     canvas="none",
