@@ -48,11 +48,33 @@ fn render_diago_svg(source : String) -> String? {
 /// Uses CSS-backed paint values so one synchronous UML SVG follows the host's
 /// current foreground and surface colors without a theme-time rerender.
 pub fn render_uml_diagram_svg(source : String) -> String? {
+  let color_scheme = viewer_uml_color_scheme()
+  Some(@uml.render_svg(source, color_scheme~)) catch {
+    _ => None
+  }
+}
+
+///|
+/// Compile one generated MoonBit interface body directly to the UML
+/// renderer's MBTI diagram family. The source is the `.mbti` file itself, not
+/// a PlantUML wrapper; malformed interfaces stay on the caller's fallback
+/// path.
+pub fn render_mbti_diagram_svg(source : String) -> String? {
+  let color_scheme = viewer_uml_color_scheme()
+  Some(@uml.render_mbti_svg(source, color_scheme~)) catch {
+    _ => None
+  }
+}
+
+///|
+/// Keep every synchronous UML surface on the same CSS-backed palette. SVGs
+/// can then follow a host theme change without recompiling their source.
+fn viewer_uml_color_scheme() -> @uml_style.ColorScheme {
   let foreground = "var(--vscode-editor-foreground, #1f2328)"
   let muted = "var(--vscode-descriptionForeground, #6e7781)"
   let surface = "var(--vscode-editorWidget-background, var(--vscode-editor-background, #ffffff))"
   let note_surface = "var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, #fff8c5))"
-  let color_scheme = @uml_style.ColorScheme(
+  ColorScheme(
     foreground,
     foreground,
     canvas="none",
@@ -69,9 +91,6 @@ pub fn render_uml_diagram_svg(source : String) -> String? {
     page_break=muted,
     transparent="none",
   )
-  Some(@uml.render_svg(source, color_scheme~)) catch {
-    _ => None
-  }
 }
 
 ///|

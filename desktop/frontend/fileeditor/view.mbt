@@ -297,8 +297,8 @@ pub fn resize_handle_view() -> @html.Html {
 /// viewer with its notice overlay, and the workspace tree (expandable and
 /// always rooted at the workspace root) as a toggleable pane on
 /// the viewer's right. Always rendered so the viewer's host element
-/// (`viewer-host`, `markdown-viewer-host`, `diff-editor-host`, and
-/// `semantic-review-host`) stay put
+/// (`viewer-host`, `markdown-viewer-host`, `mbti-diagram-host`,
+/// `diff-editor-host`, and `semantic-review-host`) stay put
 /// across renders and screen
 /// switches; CSS hides the inactive surface and the tree pane when toggled off,
 /// and collapses the whole panel to zero width when it is closed. The children's
@@ -339,6 +339,9 @@ pub fn body_view(
         )
       None => false
     })
+  let use_mbti_surface = !use_diff_surface &&
+    !use_markdown_surface &&
+    uses_mbti_diagram_surface(state, ctx)
   let use_semantic_surface = use_diff_surface &&
     state.review_diff_mode != ReviewDiffLine &&
     (match ctx.active_history_diff {
@@ -350,7 +353,7 @@ pub fn body_view(
     attrs=@html.Attrs::build()
       .id(ViewerHostId)
       .class(
-        if use_diff_surface || use_markdown_surface {
+        if use_diff_surface || use_markdown_surface || use_mbti_surface {
           "viewer-host editor-shell moonbit-viewer-surface-hidden"
         } else {
           "viewer-host editor-shell"
@@ -367,6 +370,19 @@ pub fn body_view(
           "viewer-host editor-shell"
         } else {
           "viewer-host editor-shell moonbit-viewer-surface-hidden"
+        },
+      )
+      .data_set("theme", if ctx.dark_mode { "dark" } else { "light" }),
+    ([] : Array[@html.Html]),
+  )
+  let mbti_diagram_host = @html.div(
+    attrs=@html.Attrs::build()
+      .id(MbtiDiagramHostId)
+      .class(
+        if use_mbti_surface {
+          "viewer-host editor-shell mbti-diagram-host"
+        } else {
+          "viewer-host editor-shell mbti-diagram-host moonbit-viewer-surface-hidden"
         },
       )
       .data_set("theme", if ctx.dark_mode { "dark" } else { "light" }),
@@ -409,6 +425,7 @@ pub fn body_view(
     @html.div(class="viewer-stack", [
       viewer_host,
       markdown_viewer_host,
+      mbti_diagram_host,
       diff_editor_host,
       semantic_review_host,
       viewer_notice(state, ctx),
@@ -1806,6 +1823,9 @@ pub fn breadcrumb_view(
     path_row.push(review_badge(dispatch, state, ctx))
     path_row.push(review_progress(dispatch, state, ctx))
   }
+  if mbti_view_available(state, ctx) {
+    path_row.push(mbti_view_toolbar(dispatch, state, ctx))
+  }
   path_row.push(
     @html.button(
       class="panel-toggle",
@@ -1847,6 +1867,68 @@ pub fn breadcrumb_view(
       path_row,
     )
   }
+}
+
+///|
+/// Only an ordinary, loaded generated interface owns the diagram/source
+/// presentation. Review and historical paths retain their code surfaces.
+fn mbti_view_available(state : State, ctx : Ctx) -> Bool {
+  guard ctx.active_history_diff is None && ctx.active_file is Some(path) else {
+    return false
+  }
+  state.docs.get(path) is Some({ name, state: TabLoaded(..), review: None, .. }) &&
+  uses_mbti_presentation(name)
+}
+
+///|
+fn uses_mbti_diagram_surface(state : State, ctx : Ctx) -> Bool {
+  guard mbti_view_available(state, ctx) && ctx.active_file is Some(path) else {
+    return false
+  }
+  state.mbti_view_mode(path) == MbtiDiagram
+}
+
+///|
+fn mbti_view_button(
+  dispatch : @cmd.Emit[Msg],
+  selected : MbtiViewMode,
+  mode : MbtiViewMode,
+  label : String,
+) -> @html.Html {
+  let active = selected == mode
+  @html.button(
+    type_="button",
+    class=if active {
+      "review-mode-button active"
+    } else {
+      "review-mode-button"
+    },
+    on_click=if active {
+      @cmd.none
+    } else {
+      dispatch(MbtiViewModeSelected(mode))
+    },
+    attrs=@html.Attrs::build().aria_pressed(active.to_string()),
+    label,
+  )
+}
+
+///|
+fn mbti_view_toolbar(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> @html.Html {
+  guard ctx.active_file is Some(path) else { return @html.nothing }
+  let selected = state.mbti_view_mode(path)
+  @html.div(
+    class="review-mode-toolbar mbti-view-toolbar",
+    attrs=@html.Attrs::build().role("group").aria_label("MBTI view"),
+    [
+      mbti_view_button(dispatch, selected, MbtiDiagram, "Diagram"),
+      mbti_view_button(dispatch, selected, MbtiSource, "Source"),
+    ],
+  )
 }
 
 ///|

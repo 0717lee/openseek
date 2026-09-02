@@ -7,3 +7,11 @@
 pub fn render_uml_diagram_svg(source : String) -> String? {
   @markdown_core.render_uml_diagram_svg(source)
 }
+
+///|
+/// Compile a generated `.mbti` interface body to a theme-aware SVG. Invalid
+/// or unsupported interface source returns `None` so hosts can keep a source
+/// fallback available.
+pub fn render_mbti_diagram_svg(source : String) -> String? {
+  @markdown_core.render_mbti_diagram_svg(source)
+}

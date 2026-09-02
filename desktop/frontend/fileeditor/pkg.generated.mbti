@@ -212,6 +212,13 @@ pub(all) enum HistoryDiffSide {
   HistoryModified
 } derive(Eq)
 
+pub(all) enum MbtiViewMode {
+  MbtiDiagram
+  MbtiSource
+} derive(Eq)
+pub fn MbtiViewMode::equal(Self, Self) -> Bool
+pub fn MbtiViewMode::not_equal(Self, Self) -> Bool
+
 pub struct ModelUri(String)
 pub fn ModelUri::of(@common.Uri) -> Self
 
@@ -257,6 +264,7 @@ pub(all) enum Msg {
   RevealNextReviewDiffChange
   RevealSemanticReviewSectionChange(String, Bool)
   ToggleReviewProgress
+  MbtiViewModeSelected(MbtiViewMode)
   GitOriginalLoaded(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, generation~ : Int, background~ : Bool, original~ : @protocol.GitOriginalFileReply)
   GitOriginalFailed(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, generation~ : Int, background~ : Bool, message~ : String)
   HistoryBlobLoaded(owner~ : @interop.ConversationKey, key~ : String, generation~ : Int, side~ : HistoryDiffSide, blob~ : @protocol.GitOriginalFileReply)
@@ -393,6 +401,7 @@ pub(all) struct State {
   loading : Array[@pathx.Relative]
   children : Map[@pathx.Relative, Array[FileEntry]]
   docs : Map[@pathx.Relative, Doc]
+  mbti_view_modes : Map[@pathx.Relative, MbtiViewMode]
   highlighted : @pathx.Relative?
   index : FileIndex
   error : String?

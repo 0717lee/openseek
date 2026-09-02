@@ -19,6 +19,8 @@ pub fn markdown_table_of_contents(MarkdownDocumentProjection) -> Array[MarkdownT
 
 pub fn render_markdown(String, language_id? : String, code_block_renderer? : (MarkdownCodeBlock, String?) -> String) -> MarkdownRenderFact
 
+pub fn render_mbti_diagram_svg(String) -> String?
+
 pub fn render_tokenized_code_block(MarkdownCodeBlock, String?) -> String
 
 pub fn render_uml_diagram_svg(String) -> String?

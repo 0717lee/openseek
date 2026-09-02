@@ -414,6 +414,18 @@ pub fn open_document(
     }
     _ => state
   }
+  // A position-bearing open (Search, go-to-definition, or an annotation
+  // jump) needs a visible text model so its range can be revealed. Plain file
+  // and tab opens retain this tab's explicit selection, with Diagram as the
+  // default for a newly opened `.mbti`.
+  let state = if uses_mbti_presentation(name) &&
+    (range is Some(_) || annotation is Some(_)) {
+    let mbti_view_modes = state.mbti_view_modes.copy()
+    mbti_view_modes[path] = MbtiSource
+    { ..state, mbti_view_modes, }
+  } else {
+    state
+  }
   let clear_review = if ctx.active_file == Some(path) {
     // Always clear the displayed resource, even when this path has no cached
     // `Doc`: a reviewed tab can be closed while another dock kind is active,
@@ -1082,6 +1094,9 @@ pub fn close_document(
 ) -> (@cmd.Cmd, State) {
   let docs = state.docs.copy()
   docs.remove(path)
+  let mbti_view_modes = state.mbti_view_modes.copy()
+  mbti_view_modes.remove(path)
+  let state = { ..state, mbti_view_modes, }
   // Closing a tab is useful local state even while placement is parked, but
   // promoting its neighbor must not address the missing checkout. Recovery's
   // sync pass restores whichever surviving tab the dock made active.
@@ -2248,6 +2263,27 @@ pub fn update(
       // cannot see a CSS change on its own.
       let opening = !state.tree_open
       (request_viewer_remeasure(), { ..state, tree_open: opening, })
+    }
+    MbtiViewModeSelected(mode) => {
+      guard ctx.active_history_diff is None &&
+        ctx.active_file is Some(path) &&
+        state.docs.get(path)
+        is Some({ name, state: TabLoaded(..), review: None, .. }) &&
+        uses_mbti_presentation(name) else {
+        return (@cmd.none, state)
+      }
+      if state.mbti_view_mode(path) == mode {
+        return (@cmd.none, state)
+      }
+      let mbti_view_modes = state.mbti_view_modes.copy()
+      mbti_view_modes[path] = mode
+      (
+        // A Viewer measured while hidden reports its minimum box. Switching
+        // back to Source must remeasure after the host becomes visible;
+        // Diagram is static SVG, so the same no-op-safe command is sufficient.
+        request_viewer_remeasure(),
+        { ..state, mbti_view_modes, },
+      )
     }
     DiffLoadingDue(owner~, path~, generation~) =>
       if state.owner == Some(owner) &&

@@ -84,6 +84,15 @@ pub(all) enum ReviewViewMode {
 } derive(Eq)
 
 ///|
+/// The presentation selected for an ordinary generated MoonBit interface.
+/// Diff/review and positioned navigation ignore this preference and keep the
+/// source surface, but a normal `.mbti` tab starts in diagram mode.
+pub(all) enum MbtiViewMode {
+  MbtiDiagram
+  MbtiSource
+} derive(Eq)
+
+///|
 /// The layout shared by Line and sectioned semantic comparison. This
 /// panel-level preference is independent from `ReviewViewMode`: returning to
 /// source keeps it for the next review and the next changed file.
@@ -511,6 +520,10 @@ pub(all) struct State {
   // mirrors the dock strip's file tabs (`Ctx.open_files`): the root update
   // adds an entry when it opens a tab and drops it when the tab closes.
   docs : Map[@pathx.Relative, Doc]
+  // Per-tab MBTI presentation. Absence is the normal default (`MbtiDiagram`),
+  // so a closed and later reopened interface starts rendered again. Special
+  // source-bearing opens record `MbtiSource` while that tab remains open.
+  mbti_view_modes : Map[@pathx.Relative, MbtiViewMode]
   // The directory whose immediate children are open in the breadcrumb's
   // VS Code-style picker. The legacy field and message names remain so this
   // presentation change does not grow the package's public API.
@@ -571,10 +584,19 @@ pub fn State::empty() -> State {
     loading: [],
     children: Map([]),
     docs: Map([]),
+    mbti_view_modes: Map([]),
     highlighted: None,
     index: IndexEmpty,
     error: None,
   }
+}
+
+///|
+/// An open MBTI tab defaults to its rendered diagram without storing a map
+/// entry. Explicit source/diagram selections then live only for that tab's
+/// lifetime.
+fn State::mbti_view_mode(self : State, path : @pathx.Relative) -> MbtiViewMode {
+  self.mbti_view_modes.get(path).unwrap_or(MbtiDiagram)
 }
 
 ///|
@@ -852,6 +874,9 @@ pub(all) enum Msg {
   // Mark the active changed-file review as reviewed, or return it to the
   // unreviewed queue. Ordinary file tabs ignore the action.
   ToggleReviewProgress
+  // Select the ordinary `.mbti` tab's rendered diagram or source. Reviews,
+  // history comparisons, and non-MBTI documents ignore the action.
+  MbtiViewModeSelected(MbtiViewMode)
   // One `git.original_file` request settled. `path` is always the current
   // changed path (the dock/document key), even when the host read its rename
   // source from `original_path`.
@@ -1076,6 +1101,9 @@ pub extend ReconciledPlacement with Eq::{equal, not_equal}
 
 ///|
 pub extend ReviewBaseline with Eq::{equal, not_equal}
+
+///|
+pub extend MbtiViewMode with Eq::{equal, not_equal}
 
 ///|
 pub extend ReviewDiffLayout with Eq::{equal, not_equal}
