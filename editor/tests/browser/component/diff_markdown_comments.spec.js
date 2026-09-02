@@ -104,8 +104,8 @@ test('keeps normal editor gutter room for comment and feedback controls', async 
   const modified = root.locator('.moonbit-diff-editor-modified');
 
   // Diff panes do not install the folding controller, but their shared
-  // comment/feedback lane still starts with the normal editor's 10px base +
-  // 16px folding-control reserve.
+  // comment/feedback lane still starts with the host's 10px base plus an
+  // explicit 16px diff-control reserve.
   await expectDecorationsLane(modified, 26);
 
   await control(page, 'set_feedback_enabled', true);
@@ -192,6 +192,22 @@ test('keeps normal editor gutter room for comment and feedback controls', async 
   await expect(comment).toHaveAttribute('data-documentation-expanded', 'true');
   await commentToggle.click();
   await expect(comment).toHaveAttribute('data-documentation-expanded', 'false');
+});
+
+test('keeps diff controls independent of host folding settings', async ({ page }) => {
+  const root = await openFixture(page);
+  const modified = root.locator('.moonbit-diff-editor-modified');
+
+  await control(page, 'set_folding_mode', 'disabled');
+  await expectDecorationsLane(modified, 26);
+  await control(page, 'set_feedback_enabled', true);
+  await expectDecorationsLane(modified, 44);
+
+  await control(page, 'set_feedback_enabled', false);
+  await control(page, 'set_folding_mode', 'never');
+  await expectDecorationsLane(modified, 26);
+  await control(page, 'set_feedback_enabled', true);
+  await expectDecorationsLane(modified, 44);
 });
 
 test('keeps rich comments in both split panes and only the modified inline pane', async ({ page }) => {

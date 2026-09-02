@@ -304,6 +304,21 @@ pub fn CodeEditorOptions::with_line_decorations_width(
 }
 
 ///|
+/// Returns a copy with a non-negative width added to the line-decoration
+/// gutter. Hosts use this when their surface owns controls in that lane
+/// independently of the editor's folding affordances.
+pub fn CodeEditorOptions::with_additional_line_decorations_width(
+  self : CodeEditorOptions,
+  additional_width : Int,
+) -> CodeEditorOptions {
+  {
+    ..self,
+    line_decorations_width: self.line_decorations_width +
+    additional_width.max(0),
+  }
+}
+
+///|
 /// Returns a copy with the requested line height changed.
 pub fn CodeEditorOptions::with_line_height(
   self : CodeEditorOptions,

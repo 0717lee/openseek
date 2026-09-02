@@ -59,8 +59,8 @@ pub fn CodeEditorContributionDescriptors::standalone() -> CodeEditorContribution
 ///|
 /// Diff-pane code-editor surface. It keeps ordinary navigation, hover,
 /// context menu, references, and agent feedback. The folding controller is
-/// excluded, while the host folding option remains available to retain the
-/// ordinary editor's decorations reserve for comment and feedback controls.
+/// excluded; DiffEditor disables its option and independently reserves the
+/// shared decorations lane for comment and feedback controls.
 /// Markdown-comment replacement remains installed so the diff coordinator can
 /// keep it live in both SideBySide panes and suppress only the clipped Inline
 /// original. Quick diff is excluded because a diff pane must not host a nested

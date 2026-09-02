@@ -73,6 +73,7 @@ pub fn CodeEditorOptions::equal(Self, Self) -> Bool
 pub fn CodeEditorOptions::line_height(Self) -> Double
 pub fn CodeEditorOptions::not_equal(Self, Self) -> Bool
 pub fn CodeEditorOptions::soft_wrap(Self) -> Bool
+pub fn CodeEditorOptions::with_additional_line_decorations_width(Self, Int) -> Self
 pub fn CodeEditorOptions::with_folding(Self, Bool) -> Self
 pub fn CodeEditorOptions::with_font_family(Self, String) -> Self
 pub fn CodeEditorOptions::with_font_size(Self, Double) -> Self
