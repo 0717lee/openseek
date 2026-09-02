@@ -44,6 +44,25 @@ pub fn viewport_width() -> Int? {
 }
 
 ///|
+/// Whether this page's native/browser window currently owns focus. A headless
+/// runtime has no document and defaults to focused so model tests retain the
+/// ordinary foreground behavior.
+pub fn page_has_focus() -> Bool {
+  guard js_prop(@js.globalThis, "document") is Some(document) &&
+    js_prop(document, "hasFocus") is Some(_) else {
+    return true
+  }
+  let focused : Bool = document.apply_with_string(
+    "hasFocus",
+    ([] : Array[@js.Value]),
+  )
+  let hidden : Bool = js_prop(document, "hidden")
+    .map(value => value.cast())
+    .unwrap_or(false)
+  focused && !hidden
+}
+
+///|
 /// `Date.now()` in milliseconds. Only ever used for elapsed spans between two
 /// readings taken by this page, so the clock's absolute correctness — and its
 /// agreement with the host's — does not matter.
