@@ -172,6 +172,78 @@ test('Review routes Markdown source and keeps non-MoonBit comparisons on Line di
   expect(app.pageErrors).toEqual([]);
 });
 
+test('ordinary MBTI files render as UML and reviews keep source surfaces', async ({ page }) => {
+  const app = new DesktopBrowserHarness(page);
+  const path = 'api/pkg.generated.mbti';
+  const working = [
+    'package "fixture/api"',
+    '',
+    'pub struct Point {',
+    '  x : Double',
+    '  y : Double',
+    '}',
+    '',
+    'pub trait Shape {',
+    '  area(Self) -> Double',
+    '}',
+    '',
+    'impl Shape for Point',
+  ].join('\n');
+  const baseline = working.replace('  y : Double\n', '');
+  app.searchFiles = [path];
+  app.workingFiles[path] = working;
+  app.gitChanges = [{
+    path,
+    index_status: ' ',
+    worktree_status: 'M',
+    kind: 'modified',
+  }];
+  app.gitFilesByRevision[app.gitBaseline][path] = baseline;
+
+  await app.install();
+  await app.goto();
+  await app.openSession();
+  await app.openQuickOpen();
+  await page.getByRole('option', { name: /pkg\.generated\.mbti/ }).click();
+
+  const diagram = page.locator('#mbti-diagram-host');
+  await expect(diagram).toBeVisible();
+  await expect(diagram.locator('svg')).toBeVisible();
+  await expect(diagram.locator('svg')).toContainText('Point');
+  const view = page.getByRole('group', { name: 'MBTI view' });
+  await expect(view.getByRole('button')).toHaveText(['Diagram', 'Source']);
+  await expect(view.getByRole('button', { name: 'Diagram' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+
+  await view.getByRole('button', { name: 'Source' }).click();
+  await expect(diagram).toBeHidden();
+  await expect(page.locator('#viewer-host')).toBeVisible();
+  await expect(page.locator('#viewer-host')).toContainText('Point');
+  await expect(view.getByRole('button', { name: 'Source' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await view.getByRole('button', { name: 'Diagram' }).click();
+  await expect(diagram.locator('svg')).toBeVisible();
+
+  await app.openReview();
+  await page.getByRole('button', { name: /View diff: api\/pkg\.generated\.mbti/ }).click();
+  await expect(page.getByRole('group', { name: 'MBTI view' })).toHaveCount(0);
+  await expect(diagram).toBeHidden();
+  const review = page.getByRole('toolbar', { name: 'Review mode' });
+  await expect(review.getByRole('button', { name: 'Line diff' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await review.getByRole('button', { name: 'File view' }).click();
+  await expect(page.locator('#viewer-host')).toBeVisible();
+  await expect(page.locator('#viewer-host')).toContainText('Point');
+  await expect(diagram).toBeHidden();
+  expect(app.pageErrors).toEqual([]);
+});
+
 test('Git history expands commits and opens an immutable historical diff', async ({ page }) => {
   const app = new DesktopBrowserHarness(page);
   await app.install();

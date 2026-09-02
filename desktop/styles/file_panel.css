@@ -160,6 +160,31 @@ button.panel-toggle:not(:disabled):hover {
 .viewer-stack > .viewer-host {
   flex: 1 1 auto;
 }
+.viewer-host.mbti-diagram-host {
+  box-sizing: border-box;
+  align-items: safe center;
+  justify-content: safe center;
+  padding: 24px;
+  overflow: auto;
+  color: var(--vscode-editor-foreground, var(--color-text-primary));
+  background: var(--vscode-editor-background, var(--color-bg-surface));
+  overscroll-behavior: contain;
+}
+.mbti-diagram-host:not(.moonbit-viewer-surface-hidden) {
+  display: flex;
+}
+.mbti-diagram-host > svg {
+  display: block;
+  flex: 0 0 auto;
+  margin: auto;
+}
+.mbti-diagram-error {
+  max-width: 420px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-relaxed);
+  text-align: center;
+}
 .viewer-notice {
   position: absolute;
   inset: 0;

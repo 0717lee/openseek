@@ -18,6 +18,12 @@ const ViewerHostId = "viewer-host"
 const MarkdownViewerHostId = "markdown-viewer-host"
 
 ///|
+/// The stable sibling host for the UML rendering of an ordinary generated
+/// MoonBit interface. The code Viewer keeps the same source model mounted
+/// behind it so switching back to source is non-destructive.
+const MbtiDiagramHostId = "mbti-diagram-host"
+
+///|
 /// The stable sibling host reserved for the switchable DiffEditor.
 const DiffEditorHostId = "diff-editor-host"
 
@@ -70,6 +76,11 @@ priv struct ViewerHost {
   // inside the code Viewer. It shares product services but owns its own model
   // and view-state lifetime.
   mut markdown_viewer : @viewer.MarkdownViewer?
+  // The MBTI host is plain generated SVG rather than another editor widget.
+  // Cache the rendered input so unrelated app updates do not repeat UML
+  // layout while its stable host remains mounted.
+  mut mbti_resource : String?
+  mut mbti_source : String?
   // Desired full-comparison layout survives a pre-mount command in the same
   // way font settings do for the source Viewer.
   mut diff_options : @viewer.DiffEditorOptions
@@ -127,6 +138,8 @@ let viewer_state : ViewerHost = {
   viewer: None,
   diff_editor: None,
   markdown_viewer: None,
+  mbti_resource: None,
+  mbti_source: None,
   diff_options: @viewer.DiffEditorOptions(
     editor_options=@viewer.ViewerOptions(
       theme="light",
@@ -290,6 +303,11 @@ fn supports_moon_diff(path : String) -> Bool {
 ///|
 fn uses_markdown_presentation(name : String) -> Bool {
   name.to_lower().has_suffix(".md") || language_id(name) == "markdown"
+}
+
+///|
+fn uses_mbti_presentation(name : String) -> Bool {
+  name.to_lower().has_suffix(".mbti")
 }
 
 ///|
@@ -993,6 +1011,51 @@ fn dispose_source_model(model : @model.TextModel?) -> Unit {
 }
 
 ///|
+/// Render a generated interface into the stable MBTI host at most once per
+/// resource/content pair. The UML module returns generated SVG at this trusted
+/// insertion boundary; a malformed interface gets an explicit error surface
+/// with the source toggle still available in the breadcrumb.
+fn show_mbti_diagram(resource : @common.Uri, source : String) -> Unit {
+  let resource_key = resource.to_string()
+  if viewer_state.mbti_resource == Some(resource_key) &&
+    viewer_state.mbti_source == Some(source) {
+    return
+  }
+  guard @dom.document().get_element_by_id(MbtiDiagramHostId).to_option()
+    is Some(host) else {
+    return
+  }
+  viewer_state.mbti_resource = Some(resource_key)
+  viewer_state.mbti_source = Some(source)
+  match @viewer.render_mbti_diagram_svg(source) {
+    Some(svg) => host.set_inner_html(svg)
+    None => {
+      let message =
+        #|<div class="mbti-diagram-error" role="status">This interface could not be rendered as a UML diagram. View the source for details.</div>
+      host.set_inner_html(message)
+    }
+  }
+}
+
+///|
+fn clear_mbti_diagram() -> Unit {
+  viewer_state.mbti_resource = None
+  viewer_state.mbti_source = None
+  if @dom.document().get_element_by_id(MbtiDiagramHostId).to_option()
+    is Some(host) {
+    host.set_inner_html("")
+  }
+}
+
+///|
+/// Schedule an imperative editor effect for the render that exposes its stable
+/// host. Keeping the scheduler plumbing here also leaves large effect bodies in
+/// the formatter's compact single-closure form.
+fn after_render_effect(action : () -> Unit) -> @cmd.Cmd {
+  @cmd.custom_cmd(_scheduler => action(), kind=@cmd.after_render)
+}
+
+///|
 /// Show a file's contents in the viewer as a fresh read-only document. A
 /// symbol jump's `range`, when present, is revealed centered once the
 /// document is set. The caret stays collapsed at the range start while an
@@ -1026,10 +1089,11 @@ fn show_file_in_viewer(
   diff? : (String, String),
   search_highlights? : @grep_search.EditorHighlights,
 ) -> @cmd.Cmd {
-  let show = @cmd.custom_cmd(_scheduler => {
-    // Reads are always batched behind a mount request whose after-render tick
-    // runs before this async reply, so the viewer exists here (see
-    // `ViewerHost::viewer`); the guard only drops a pathological stray.
+  let show = after_render_effect(() => {
+    // A fast host (including the browser fixture) may settle `read_file`
+    // before the mount command from the open action reaches its after-render
+    // phase. Commit the document in that same phase so the stable hosts and
+    // their widgets exist before either the source model or MBTI SVG is set.
     guard viewer_state.viewer is Some(viewer) &&
       viewer_state.markdown_viewer is Some(markdown_viewer) else {
       return
@@ -1051,6 +1115,9 @@ fn show_file_in_viewer(
         ) catch {
           _ => return
         }
+    }
+    if uses_mbti_presentation(name) {
+      show_mbti_diagram(uri, content)
     }
     // Whether anything needs redrawing is decided here, against the document
     // the viewer really shows — the update loop only says "show this", it
@@ -1357,6 +1424,7 @@ fn clear_viewer() -> @cmd.Cmd {
     viewer_state.absolute = None
     viewer_state.relative = None
     viewer_state.navigation = None
+    clear_mbti_diagram()
     clear_diff_comparison()
     clear_semantic_review_editors()
   })
@@ -1394,6 +1462,7 @@ fn clear_document() -> @cmd.Cmd {
     viewer_state.absolute = None
     viewer_state.relative = None
     viewer_state.navigation = None
+    clear_mbti_diagram()
   })
 }
 

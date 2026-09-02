@@ -92,6 +92,7 @@ export class DesktopBrowserHarness {
         '',
       ].join('\n'),
     };
+    this.searchFiles = ['src/main.mbt', 'README.md'];
     // Transcript images use the same fs.read_file RPC as text files, but the
     // real host returns bytes plus a verified media type. Tests opt into that
     // response per path instead of bypassing the product image loader.
@@ -773,7 +774,7 @@ export class DesktopBrowserHarness {
         };
       case 'fs.search_files':
         return {
-          files: ['src/main.mbt', 'README.md'],
+          files: [...this.searchFiles],
           from_cache: false,
           limit_hit: false,
           cancelled: false,
