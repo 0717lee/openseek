@@ -245,6 +245,12 @@ const AppFontStorageKey : String = "openseek.font"
 const AppFontSizeStorageKey : String = "openseek.font_size"
 
 ///|
+/// Whether input submitted during a run steers that turn or waits for the
+/// next one. This is a page-local interaction preference, like theme and
+/// font, rather than part of a host's engine configuration.
+const FollowupBehaviorStorageKey : String = "openseek.followup_behavior"
+
+///|
 /// The tier new conversations are born with — the last one picked in the
 /// composer, and the fallback for a conversation nothing remembers.
 const ModelStorageKey : String = "openseek.model"
@@ -1354,6 +1360,7 @@ priv struct Model {
   // edited through `settings.set`.
   api_provider : ApiProvider
   custom_api_url : String
+  // Page-local interaction preference, persisted with the other UI choices.
   followup_behavior : FollowupBehavior
   // Host-settings writes still in flight. While any are, incoming
   // `settings.changed` broadcasts and `settings.get` replies may predate an
@@ -1627,7 +1634,6 @@ priv struct HostSettings {
   has_deepseek_key : Bool
   has_glm_key : Bool
   has_custom_key : Bool
-  followup_behavior : String
 } derive(Eq)
 
 ///|
@@ -1645,6 +1651,7 @@ priv enum Msg {
     theme~ : String,
     font~ : String,
     font_size~ : String,
+    followup_behavior~ : String,
     model~ : String,
     conversation_models~ : String,
     agent~ : String,
@@ -2696,7 +2703,6 @@ fn Model::clear_host_settings(self : Model) -> Model {
     api_setup_open: false,
     api_provider: Deepseek,
     custom_api_url: "",
-    followup_behavior: FollowupSteer,
     deepseek_key_saved: false,
     glm_key_saved: false,
     custom_key_saved: false,
@@ -2721,7 +2727,6 @@ fn Model::apply_host_settings(self : Model, settings : HostSettings) -> Model {
     deferred_host_settings: None,
     api_provider: ApiProvider::parse(settings.provider),
     custom_api_url: settings.custom_api_url,
-    followup_behavior: FollowupBehavior::parse(settings.followup_behavior),
     deepseek_key_saved: settings.has_deepseek_key,
     glm_key_saved: settings.has_glm_key,
     custom_key_saved: settings.has_custom_key,

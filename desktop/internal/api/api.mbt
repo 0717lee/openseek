@@ -520,7 +520,6 @@ pub fn endpoints(
         let status = @engine.update_settings(
           state.manager,
           payload.to_patch(),
-          followup_behavior?=payload.followup_behavior,
           legacy_migration=payload.legacy_migration == Some(true),
           on_committed=fn(status) {
             // Every client renders these settings; clients that did not ask

@@ -16,7 +16,6 @@ fn HostSettings::from_status(
     has_deepseek_key: payload.has_deepseek_key,
     has_glm_key: payload.has_glm_key,
     has_custom_key: payload.has_custom_key,
-    followup_behavior: payload.followup_behavior,
   }
 }
 
@@ -106,7 +105,6 @@ fn provider_settings_patch(
     glm_api_key: None,
     custom_api_key: None,
     legacy_migration: None,
-    followup_behavior: None,
   }
 }
 
@@ -121,7 +119,6 @@ fn custom_url_settings_patch(url : String) -> @protocol.SettingsSetPayload {
     glm_api_key: None,
     custom_api_key: None,
     legacy_migration: None,
-    followup_behavior: None,
   }
 }
 
@@ -149,7 +146,6 @@ fn api_key_settings_patch(
       None
     },
     legacy_migration: None,
-    followup_behavior: None,
   }
 }
 
@@ -194,22 +190,6 @@ fn legacy_settings_patch(
       Some(custom_api_key)
     },
     legacy_migration: Some(true),
-    followup_behavior: None,
-  }
-}
-
-///|
-fn followup_behavior_patch(
-  behavior : FollowupBehavior,
-) -> @protocol.SettingsSetPayload {
-  {
-    provider: None,
-    custom_api_url: None,
-    deepseek_api_key: None,
-    glm_api_key: None,
-    custom_api_key: None,
-    legacy_migration: None,
-    followup_behavior: Some(behavior.wire()),
   }
 }
 

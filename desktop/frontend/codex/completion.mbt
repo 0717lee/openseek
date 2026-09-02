@@ -340,7 +340,11 @@ pub fn State::composer_input(
     self.connection is CodexReady &&
     !missing_worktree
   let primary_action = if active_turn is Some(_) {
-    @composer.Running(steer_available=can_edit, can_stop=true)
+    @composer.Running(
+      steer_available=can_edit,
+      can_stop=true,
+      submit=@composer.Steer,
+    )
   } else {
     @composer.Send(available=!self.loading && can_edit && self.has_active())
   }
@@ -517,7 +521,7 @@ fn State::apply_composer_action(
     | @composer.ArchivedInputDismissed(..)
     | @composer.QueuedInputEditRequested(..)
     | @composer.QueuedInputSteerRequested(..)
-    | @composer.QueuedInputWithdrawRequested(..)
+    | @composer.QueuedInputDeleteRequested(..)
     | @composer.WorktreePlacementRetried(..) => (@cmd.none, self)
   }
 }

@@ -32,6 +32,13 @@ fn Model::composer_input(self : Model) -> @composer.Input {
         conv.run is Open(stage~, ..) &&
         !(stage is Cancelling),
       can_stop=can_stop(conv),
+      submit=if conv.queue_edit_id is Some(_) {
+        @composer.SaveQueue
+      } else if self.followup_behavior is FollowupQueue {
+        @composer.Queue
+      } else {
+        @composer.Steer
+      },
     )
   } else {
     @composer.Send(available=root_ready && conv.compaction is NotCompacting)
@@ -102,24 +109,36 @@ fn Model::composer_input(self : Model) -> @composer.Input {
   if conv.archived_pending_input {
     context.push(@composer.ArchivedInputNotice(text=ArchivedPendingInputNotice))
   }
-  if !conv.pending_steers.is_empty() {
+  if !conv.pending_steers.is_empty() && self.followup_behavior is FollowupSteer {
     context.push(
       @composer.PendingSteerPanel(
         items=conv.pending_steers.map(steer => user_display_text(steer.content)),
-        queued=self.followup_behavior is FollowupQueue,
       ),
     )
   }
-  if !conv.queued_inputs.is_empty() {
-    context.push(
-      @composer.QueuedInputPanel(
-        items=conv.queued_inputs.map(item => {
-          id: item.id,
-          content: user_display_text(item.content),
-          editing: conv.queue_edit_id == Some(item.id),
-        }),
+  let queued_items : Array[@composer.QueuedInput] = []
+  let interactive = conv.run is Open(stage~, ..) && !(stage is Cancelling)
+  for item in conv.queued_inputs {
+    queued_items.push({
+      id: item.id,
+      content: user_display_text(item.content),
+      state: @composer.Queued(
+        editing=conv.queue_edit_id == Some(item.id),
+        interactive~,
       ),
-    )
+    })
+  }
+  if self.followup_behavior is FollowupQueue {
+    for item in conv.pending_steers {
+      queued_items.push({
+        id: item.submission_id,
+        content: user_display_text(item.content),
+        state: @composer.Queueing,
+      })
+    }
+  }
+  if !queued_items.is_empty() {
+    context.push(@composer.QueuedInputPanel(items=queued_items))
   }
   match conv.compaction {
     Requested | Compacting =>

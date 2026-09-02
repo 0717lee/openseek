@@ -342,21 +342,14 @@ pub fn ContextComponent::render(
           "Got it",
         ),
       ])
-    PendingSteerPanel(items~, queued~) => {
+    PendingSteerPanel(items~) => {
       let rows : Array[@html.Html] = []
       for shown in items {
         rows.push(
           @html.div(class="pending-steer-row", title=shown, [
             @html.span(class="pending-steer-icon", "⤷"),
             @html.span(class="pending-steer-text", shown),
-            @html.span(
-              class="pending-steer-state",
-              if queued {
-                "queueing…"
-              } else {
-                "steering…"
-              },
-            ),
+            @html.span(class="pending-steer-state", "steering…"),
           ]),
         )
       }
@@ -365,44 +358,81 @@ pub fn ContextComponent::render(
     QueuedInputPanel(items~) => {
       let rows : Array[@html.Html] = []
       for item in items {
-        rows.push(
-          @html.div(class="queued-input-row", title=item.content, [
-            @html.span(class="queued-input-icon", "↳"),
-            @html.span(class="queued-input-text", item.content),
-            @html.div(class="queued-input-actions", [
-              @html.button(
-                class="queued-input-action",
-                type_="button",
-                title="Edit this queued message",
-                on_click=action_emit(
-                  QueuedInputEditRequested(identity~, id=item.id),
-                ),
-                if item.editing {
-                  "Editing"
+        let trailing : Array[@html.Html] = []
+        match item.state {
+          Queueing =>
+            trailing.push(
+              @html.span(class="queued-input-state pending", "queueing…"),
+            )
+          Queued(editing~, interactive~) => {
+            trailing.push(
+              @html.span(
+                class="queued-input-state",
+                if interactive {
+                  "Queued"
                 } else {
-                  "Edit"
+                  "Queued for resume"
                 },
               ),
-              @html.button(
-                class="queued-input-action",
-                type_="button",
-                title="Send this message to the current turn now",
-                on_click=action_emit(
-                  QueuedInputSteerRequested(identity~, id=item.id),
-                ),
-                "Steer",
-              ),
-              @html.button(
-                class="queued-input-action danger",
-                type_="button",
-                title="Withdraw this queued message",
-                on_click=action_emit(
-                  QueuedInputWithdrawRequested(identity~, id=item.id),
-                ),
-                "Withdraw",
-              ),
-            ]),
-          ]),
+            )
+            if interactive {
+              trailing.push(
+                @html.div(class="queued-input-actions", [
+                  @html.button(
+                    class="queued-input-action",
+                    type_="button",
+                    title="Steer",
+                    attrs=@html.Attrs::build().aria_label("Steer"),
+                    on_click=action_emit(
+                      QueuedInputSteerRequested(identity~, id=item.id),
+                    ),
+                    @icons.icon(@icons.icon_arrow_up),
+                  ),
+                  @html.button(
+                    class=if editing {
+                      "queued-input-action active"
+                    } else {
+                      "queued-input-action"
+                    },
+                    type_="button",
+                    title=if editing { "Editing" } else { "Edit" },
+                    attrs=@html.Attrs::build().aria_label(
+                      if editing {
+                        "Editing"
+                      } else {
+                        "Edit"
+                      },
+                    ),
+                    on_click=action_emit(
+                      QueuedInputEditRequested(identity~, id=item.id),
+                    ),
+                    @icons.icon(@icons.icon_edit),
+                  ),
+                  @html.button(
+                    class="queued-input-action danger",
+                    type_="button",
+                    title="Delete",
+                    attrs=@html.Attrs::build().aria_label("Delete"),
+                    on_click=action_emit(
+                      QueuedInputDeleteRequested(identity~, id=item.id),
+                    ),
+                    @icons.icon(@icons.icon_trash),
+                  ),
+                ]),
+              )
+            }
+          }
+        }
+        rows.push(
+          @html.div(
+            class="queued-input-row",
+            title=item.content,
+            [
+              @html.span(class="queued-input-icon", "↳"),
+              @html.span(class="queued-input-text", item.content),
+              ..trailing,
+            ],
+          ),
         )
       }
       @html.div(class="queued-inputs", rows)
