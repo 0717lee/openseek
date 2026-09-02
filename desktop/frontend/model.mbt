@@ -848,11 +848,11 @@ priv struct Conversation {
   pull_request_generation : Int
   // Everything belonging to the turn in flight; see `RunState`.
   turn : RunState
-  // Steers submitted into an open run and not yet acknowledged — the queue
-  // the composer renders as pending, and never a second text queue beside
-  // it. Entries leave on their exact id-bearing receipt, or with the run
-  // they belong to. Canonical User text never claims ownership, so identical
-  // steers from multiple clients cannot collide.
+  // Follow-ups submitted into an open run and not yet acknowledged. Queue
+  // additions leave when their durable Added event arrives; steers leave on
+  // their exact id-bearing receipt, or with the run they belong to. Canonical
+  // User text never claims ownership, so identical steers from multiple
+  // clients cannot collide.
   pending_steers : Array[PendingSteer]
   // Durable prompts waiting to become later turns. Unlike `pending_steers`,
   // this is reconstructed exclusively from session queue events.
@@ -1003,11 +1003,12 @@ fn GoalRequest::settled_by(
 }
 
 ///|
-/// One steer submitted into an open run and awaiting its id-bearing receipt.
-/// The globally unique `submission_id` is the only ownership proof: canonical
-/// transcript text and legacy receipts without an id never settle this entry.
-/// The original draft shape is retained so a definitive refusal can restore
-/// it to the composer without exposing the serialized mention envelope.
+/// One follow-up submitted into an open run. A queued follow-up waits for its
+/// durable Added event; a steer waits for its id-bearing receipt. The globally
+/// unique `submission_id` is the only ownership proof: canonical transcript
+/// text and legacy receipts without an id never settle this entry. The
+/// original draft shape is retained so a definitive refusal can restore it to
+/// the composer without exposing the serialized mention envelope.
 priv struct PendingSteer {
   submission_id : String
   // The run this steer was sent into. A receipt names it too, which is what
@@ -1016,6 +1017,10 @@ priv struct PendingSteer {
   content : String
   draft : String
   mentions : Array[Mention]
+  // The action this particular submission took. The setting may change while
+  // it is in flight, so presentation cannot be derived from the current
+  // global default.
+  behavior : FollowupBehavior
 } derive(Eq)
 
 ///|
@@ -2072,6 +2077,12 @@ priv enum DeviceMsg {
   // this composer.
   SteerRejected(session~ : String, submission_id~ : String, run_id~ : String)
   QueueAddRejected(session~ : String, submission_id~ : String, run_id~ : String)
+  QueueSteerRejected(
+    session~ : String,
+    submission_id~ : String,
+    run_id~ : String,
+    message~ : String
+  )
   // The addressed run was already absent when Stop reached the host. This is
   // success for the user's intent, but no future Finished notification can
   // retire a stale local Cancelling phase, so the reply itself must do it.
@@ -3625,6 +3636,7 @@ fn Conversation::enqueue_steer(
   content : String,
   draft : String,
   mentions : Array[Mention],
+  behavior : FollowupBehavior,
 ) -> Conversation {
   let pending_steers = self.pending_steers.copy()
   pending_steers.push({
@@ -3633,6 +3645,7 @@ fn Conversation::enqueue_steer(
     content,
     draft,
     mentions: mentions.copy(),
+    behavior,
   })
   { ..self, pending_steers, }
 }

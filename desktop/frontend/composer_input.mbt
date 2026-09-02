@@ -109,16 +109,22 @@ fn Model::composer_input(self : Model) -> @composer.Input {
   if conv.archived_pending_input {
     context.push(@composer.ArchivedInputNotice(text=ArchivedPendingInputNotice))
   }
-  if !conv.pending_steers.is_empty() && self.followup_behavior is FollowupSteer {
+  let steering = conv.pending_steers.filter(input => {
+    input.behavior is FollowupSteer
+  })
+  if !steering.is_empty() {
     context.push(
       @composer.PendingSteerPanel(
-        items=conv.pending_steers.map(steer => user_display_text(steer.content)),
+        items=steering.map(steer => user_display_text(steer.content)),
       ),
     )
   }
   let queued_items : Array[@composer.QueuedInput] = []
   let interactive = conv.run is Open(stage~, ..) && !(stage is Cancelling)
   for item in conv.queued_inputs {
+    if steering.iter().any(input => input.submission_id == item.id) {
+      continue
+    }
     queued_items.push({
       id: item.id,
       content: user_display_text(item.content),
@@ -128,8 +134,8 @@ fn Model::composer_input(self : Model) -> @composer.Input {
       ),
     })
   }
-  if self.followup_behavior is FollowupQueue {
-    for item in conv.pending_steers {
+  for item in conv.pending_steers {
+    if item.behavior is FollowupQueue {
       queued_items.push({
         id: item.submission_id,
         content: user_display_text(item.content),

@@ -1277,6 +1277,17 @@ fn queue_openseek(
             scheduler.add(
               dispatch(QueueAddRejected(session~, submission_id=id, run_id~)),
             )
+          } else if action == "steer" {
+            scheduler.add(
+              dispatch(
+                QueueSteerRejected(
+                  session~,
+                  submission_id=id,
+                  run_id~,
+                  message="Queue action failed: \{@interop.bridge_error_text(error)}",
+                ),
+              ),
+            )
           } else {
             scheduler.add(
               root_dispatch(
@@ -1293,6 +1304,17 @@ fn queue_openseek(
         if action == "add" {
           scheduler.add(
             dispatch(QueueAddRejected(session~, submission_id=id, run_id~)),
+          )
+        } else if action == "steer" {
+          scheduler.add(
+            dispatch(
+              QueueSteerRejected(
+                session~,
+                submission_id=id,
+                run_id~,
+                message="The queued message is no longer available.",
+              ),
+            ),
           )
         } else {
           scheduler.add(

@@ -500,6 +500,12 @@ pub fn queue_run(
   ) else {
     return { accepted: false, run_id: Some(run_id), }
   }
+  if payload.action == "steer" && payload.text is Some(text) && !text.is_blank() {
+    // The serve process reports the queued prompt through the ordinary
+    // steer_applied channel. Retain its queue id so every client can settle
+    // the exact Steering row instead of matching user text.
+    ignore(live.steer_runs.record_sent(text, Some(id)))
+  }
   match payload.action {
     "add" => live.queued_runs.push({ id, run_id: mint_run_id(), })
     "withdraw" | "steer" =>

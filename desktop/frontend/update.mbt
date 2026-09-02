@@ -2095,6 +2095,22 @@ fn update_msg(
               guard conv.run is Open(run_id~, stage~) && !(stage is Cancelling) else {
                 return (@cmd.none, model)
               }
+              guard conv.queued_inputs.search_by(item => item.id == id)
+                is Some(index) &&
+                !conv.pending_steers
+                .iter()
+                .any(input => input.submission_id == id) else {
+                return (@cmd.none, model)
+              }
+              let item = conv.queued_inputs[index]
+              let conv = conv.enqueue_steer(
+                id,
+                Some(run_id),
+                item.content,
+                user_display_text(item.content),
+                [],
+                FollowupSteer,
+              )
               (
                 queue_openseek(
                   dispatch,
@@ -2102,10 +2118,10 @@ fn update_msg(
                   conv.session_id,
                   "steer",
                   id,
-                  None,
+                  Some(item.content),
                   run_id,
                 ),
-                model,
+                model.replace_conversation(conv),
               )
             }
             @composer.QueuedInputDeleteRequested(id~, ..) => {
@@ -3474,6 +3490,7 @@ fn update_msg(
             task,
             conv.task,
             conv.mentions,
+            model.followup_behavior,
           )
           let command = if model.followup_behavior is FollowupQueue {
             queue_openseek(
@@ -5508,6 +5525,20 @@ fn update_device_msg(
           .notify_error(
             dispatch, "Message was not queued (the task ended as you sent it) — it is back in the composer.",
           )
+        } else {
+          (@cmd.none, model)
+        }
+      } else {
+        (@cmd.none, model)
+      }
+    QueueSteerRejected(session~, submission_id~, run_id~, message~) =>
+      if model.find_conversation(channel, session) is Some(conv) {
+        let (next, removed) = conv.acknowledge_steer(
+          submission_id,
+          Some(run_id),
+        )
+        if removed {
+          model.replace_conversation(next).notify_error(dispatch, message)
         } else {
           (@cmd.none, model)
         }
@@ -8035,6 +8066,7 @@ fn with_pending_steers(
       text,
       text,
       [],
+      FollowupSteer,
     )
   }
   next
