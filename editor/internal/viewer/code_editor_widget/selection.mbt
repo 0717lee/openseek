@@ -280,6 +280,4 @@ extern "js" fn write_selection_clipboard_data(
   #|     data.setData("text/plain", plain);
   #|     data.setData("text/html", html);
   #|   }
-  #|   globalThis.__readonlyEditorCopiedText = plain;
-  #|   globalThis.__readonlyEditorCopiedHtml = html;
   #| }

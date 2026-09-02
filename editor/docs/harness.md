@@ -10,12 +10,9 @@ is no fake-DOM mounted Viewer layer between them.
 ```sh
 just test                    # MoonBit correctness
 just test-browser-smoke      # browser correctness: smoke + component
-just test-browser-perf       # opt-in performance diagnostics
 ```
 
-`just test-browser` is an alias for `just test-browser-smoke`. Routine
-development does not run the perf suite; use it when investigating performance
-or changing the perf harness and its scroll-frame oracle.
+`just test-browser` is an alias for `just test-browser-smoke`.
 
 Focused build and development commands are:
 
@@ -23,7 +20,6 @@ Focused build and development commands are:
 just build                       # production assets + default Wasm server
 just dist-front-end              # production browser assets only
 just build-browser-tests         # browser-correctness scenario bundles
-just build-browser-perf-tests    # perf scenarios + pinned Monaco oracle
 just                             # build and serve with repository defaults
 just test-browser-component      # direct Viewer subset of browser correctness
 just ROOT=. PORT=5173 dev        # build, serve, and print Local/Network URLs
@@ -38,7 +34,7 @@ Playwright owns `http://127.0.0.1:5174` by default and uses the deterministic
 `tests/fixtures/workspace`. Set `READONLY_EDITOR_BASE_URL` to target an already
 running server explicitly; only that opt-in path may reuse an existing server.
 The direct Playwright CLI starts the default Wasm server without rebuilding
-assets and assumes the matching browser-build profile has already run; use the
+assets and assumes the browser bundles have already been staged; use the
 `just test-browser-*` recipes when bundle freshness matters.
 
 `just dev` defaults to `HOST=0.0.0.0`: it binds every IPv4 interface and prints
@@ -91,40 +87,35 @@ visible windows, scroll/reveal math, decoration inputs, and contribution state.
 tests/browser/
   smoke/       real workbench/embed workflows and real pointer input
   component/   direct public-Viewer scenarios reported as compact JSON
-  perf/        opt-in performance diagnostics and scroll-frame traces
   moonbit/     js-target scenario packages
   support/     Playwright fixtures, logging, and reporters
 ```
 
 The browser-correctness gate runs both `smoke/` and `component/`. Their
 directory names describe how they reach the browser surface, not separate
-top-level quality gates. GitHub Actions retries a failed browser test once in
-a fresh Playwright worker because the hosted macOS runner can transiently stall
-native input, layout, or fixture-watch delivery. Local runs do not retry, and
-the failed CI attempt retains its trace in the job-local output directory; a
-deterministic regression therefore fails both attempts and still fails the
-gate.
+top-level quality gates. Playwright does not retry failed tests locally or in
+GitHub Actions: a flaky first attempt is a failed gate, not a green run hidden
+behind a fresh worker. Unexpected console errors, page errors, failed requests,
+and HTTP responses at status 400 or above also fail the current test.
 
-The component suite is intentionally capped at 43 tests. Its retained surface
-is limited to real font/Range/iframe geometry, native keyboard/pointer/copy
-bridges, context menus and modifier links, folding gestures, Markdown layout
-and diagram input, DOM convergence, ViewZone ownership/geometry/mouse
-suppression, and the small dedicated public-Viewer contracts. Version and
-identity matrices, provider cancellation, transaction ordering, and semantic
-no-op behavior belong to Headless MoonBit tests. Attachment, node ownership,
-render scheduling, and browser-widget lifecycle belong to Playwright.
+Every component case must justify why its contract needs Chromium. The retained
+surface is limited to real font/Range/iframe geometry, native
+keyboard/pointer/copy bridges, context menus and modifier links, folding
+gestures, Markdown layout and diagram input, DOM convergence, ViewZone
+ownership/geometry/mouse suppression, and small dedicated public-Viewer
+contracts. Version and identity matrices, provider cancellation, transaction
+ordering, and semantic no-op behavior belong to Headless MoonBit tests.
+Attachment, node ownership, render scheduling, and browser-widget lifecycle
+belong to Playwright.
 
 Compilation is `moon build`'s job: every js entry point declares
 `supported_targets = "js"`, so one workspace build emits all of them.
 `scripts/build-web.mbtx` assembles the production reference app and embed page,
 then owner-adjacent CSS and codicons, under `web/dist`;
 `scripts/stage_mermaid` adds the pinned, SHA-256-verified local Mermaid ESM
-tree. `scripts/build-browser-tests.mbtx` has separate `smoke` and `perf`
-profiles under `web/dist/browser-tests`. The smoke profile stages the
-MoonBit scenarios used by browser correctness without touching the perf bundle
-or Monaco. The perf profile stages only its local scenarios plus the pinned
-Monaco oracle, which it builds with esbuild from the VS Code submodule. Before
-staging, the browser-test assembler requires every selected bundle and source
+tree. `scripts/build-browser-tests.mbtx` stages the MoonBit scenarios used by
+browser correctness under `web/dist/browser-tests`. Before staging, the
+browser-test assembler requires every selected bundle and source
 map to exist in exactly one of the module-qualified or unqualified layouts; it
 rejects ambiguous layouts rather than risking a stale artifact from a different
 `moon.work` context.
@@ -146,8 +137,8 @@ A browser-visible contract normally has two adjacent owners:
   sidebar, remote protocol, file watching, or host tool adapter is part of the
   behavior.
 
-When adding a scenario package, declare its JS target and add its bundle to the
-appropriate profile in `scripts/build-browser-tests.mbtx`. Keep exact routes,
+When adding a scenario package, declare its JS target and add its bundle to
+`scripts/build-browser-tests.mbtx`. Keep exact routes,
 query flags, selectors, globals, and focused-run instructions in
 `tests/browser/README.md` or the owning package README. Keep feature behavior in
 the owning package docs and focused tests; do not grow a feature-by-feature
@@ -170,13 +161,6 @@ catalog in this cross-cutting harness guide.
   on browser DOM snapshots against Monaco. Source-shaped control flow is
   required only for algorithm-fidelity slices where ordering or arithmetic is
   part of the contract.
-- A targeted real-commit comparison may observe the same concrete DOM effect
-  in both implementations when that effect is the selected behavior. The
-  scroll-frame oracle records accepted state and local render phases, then
-  observes `.lines-content` `top`/`left` mutations. It groups callbacks by the
-  native rAF timestamp; getter samples alone remain state/cadence evidence, and
-  ambient cadence remains diagnostic rather than a budget. This oracle belongs
-  to the opt-in perf workflow, not the routine correctness gate.
 - The MoonBit reporter only emits data; Playwright validates the report and
   owns pass/fail.
 
@@ -184,11 +168,11 @@ catalog in this cross-cutting harness guide.
 
 `tests/browser/support/test.js` writes `runner.log` and a failure screenshot;
 the Playwright configuration retains failure traces and screenshots under
-`test-results/browser/**`. Component and perf suites also attach their JSON
+`test-results/browser/**`. Component suites also attach their JSON
 reports. Shared listeners record console messages, uncaught page errors, failed
-requests, and HTTP responses at status 400 or above for diagnosis. Those events
-do **not** globally fail a test: a spec must assert the relevant failure
-explicitly when it is part of that feature's contract. Set
+requests, and HTTP responses at status 400 or above for diagnosis. If the test
+body otherwise passes, any of those events still fails the test at fixture
+teardown so a green result cannot hide a browser or network failure. Set
 `READONLY_EDITOR_TEST_VERBOSE=1` or `PW_VERBOSE=1` to mirror logs to the terminal.
 
 The current monorepo [editor workflow](../../.github/workflows/editor.yml) runs

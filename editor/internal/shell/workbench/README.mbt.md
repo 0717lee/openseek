@@ -162,5 +162,4 @@ events, storage, and protocol URL lookup.
 Run `moon test internal/shell/workbench --target js`, then the read-only check
 gate (`moon check --target all --warn-list +73 --deny-warn` and `moon fmt --check`) and
 `just test-browser-smoke`. See `docs/quality.md` for the complete required
-checks. Use `just test-browser-perf` only for performance investigation or
-perf-harness changes.
+checks.

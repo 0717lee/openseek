@@ -14,8 +14,19 @@ async function mountComponentViewer(page) {
 }
 
 async function copySelection(page) {
+  const editor = page.locator('.monaco-editor.readonly-editor');
+  await editor.evaluate((root) => {
+    root.addEventListener(
+      'copy',
+      (event) => {
+        root.__testCopiedText =
+          event.clipboardData?.getData('text/plain') ?? '';
+      },
+      { once: true },
+    );
+  });
   await page.keyboard.press('ControlOrMeta+C');
-  return page.evaluate(() => globalThis.__readonlyEditorCopiedText || '');
+  return editor.evaluate((root) => root.__testCopiedText ?? '');
 }
 
 test('double-click selects the word under the pointer', async ({ page }) => {

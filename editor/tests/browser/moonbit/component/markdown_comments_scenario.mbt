@@ -210,6 +210,7 @@ fn poll_markdown_comments_ready(
   let text = @support.query_text(".markdown-comments-host")
   if zones == 3 &&
     diagrams == 2 &&
+    text is Some(text) &&
     text.contains("Start comment") &&
     text.contains("Middle comment") &&
     text.contains("EOF paragraph") &&
@@ -266,17 +267,21 @@ extern "js" fn install_markdown_comments_controls(
   #|       defaultPrevented: event.defaultPrevented,
   #|       nativeSelection: document.getSelection()?.toString() ?? '',
   #|       targetClass: event.target?.className ?? '',
+  #|       plain: event.clipboardData?.getData('text/plain') ?? '',
+  #|       html: event.clipboardData?.getData('text/html') ?? '',
   #|     });
   #|   });
   #|   globalThis.__markdownCommentsControls = {
   #|     state: () => JSON.parse(stateJson()),
   #|     keys: () => [...keyLog],
   #|     copies: () => [...copyLog],
+  #|     copied_payload: () => {
+  #|       const latest = copyLog.at(-1);
+  #|       return { plain: latest?.plain ?? '', html: latest?.html ?? '' };
+  #|     },
   #|     clear_input_log: () => {
   #|       keyLog.length = 0;
   #|       copyLog.length = 0;
-  #|       delete globalThis.__readonlyEditorCopiedText;
-  #|       delete globalThis.__readonlyEditorCopiedHtml;
   #|     },
   #|     mermaid_source: mermaidSource,
   #|     mermaid_offscreen_source: mermaidOffscreenSource,

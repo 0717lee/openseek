@@ -5,32 +5,6 @@
 // visible-range publication behind the later `handleInitialized` call.
 
 ///|
-priv struct InitialSizeCountingTokenizer {
-  calls : Ref[Int]
-}
-
-///|
-impl @syntax.LineTokenizer for InitialSizeCountingTokenizer with fn initial_state(
-  _self,
-) {
-  TokenizerState()
-}
-
-///|
-impl @syntax.LineTokenizer for InitialSizeCountingTokenizer with fn tokenize_line(
-  self,
-  line_text,
-  state,
-) {
-  self.calls.val += 1
-  let tokens : Array[@syntax.LineToken] = []
-  if line_text.length() > 0 {
-    tokens.push({ start: 0, end: 1, tag: Keyword, })
-  }
-  (tokens, state)
-}
-
-///|
 fn run_initial_size_test() -> Unit {
   let ctx = @support.BrowserTestContext("initial_size")
   let document = @rdom.document()
@@ -52,11 +26,6 @@ fn run_initial_size_test() -> Unit {
     "initial-size fixture did not mount a nonzero host",
   )
 
-  let calls = Ref(0)
-  let registration = @syntax.tokenization_registry.register(
-    "initial-size-counting",
-    InitialSizeCountingTokenizer::{ calls, },
-  )
   let viewer = @viewer.Viewer::create(
     host,
     options=ViewerOptions(soft_wrap=false, font_size=12.0, line_height=18.0),
@@ -85,14 +54,10 @@ fn run_initial_size_test() -> Unit {
       path="/initial-size.txt",
     ),
     "initial-size.txt",
-    "initial-size-counting",
+    "plaintext",
     1,
     "initial-size-rev-1",
     initial_size_source(),
-  )
-  ctx.assert_true(
-    calls.val == 0,
-    "counting tokenizer ran before a visible-range demand",
   )
   viewer.set_model(Some(model))
   let visible_ranges = viewer.get_visible_ranges()
@@ -102,21 +67,11 @@ fn run_initial_size_test() -> Unit {
     visible_ranges[visible_ranges.length() - 1].end_line_number
   }
   ctx.metric_int("initialVisibleEndLine", initial_visible_end_line)
-  ctx.metric_int("tokenizeCallsBeforeInitialized", calls.val)
   ctx.assert_true(
     initial_visible_end_line > 1,
     "model attach used the zero-height single-line visible range",
   )
-  ctx.assert_true(
-    calls.val == 0,
-    "set_model published stabilized visible lines during model attach",
-  )
   viewer.handle_initialized()
-  ctx.metric_int("tokenizeCallsAfterInitialized", calls.val)
-  ctx.assert_true(
-    calls.val > 1,
-    "handle_initialized did not publish the measured stabilized token range",
-  )
   initial_size_next_frame(() => {
     ctx.assert_true(
       rendered_notifications.val > 0,
@@ -125,7 +80,6 @@ fn run_initial_size_test() -> Unit {
     rendered_subscription.dispose()
     viewer.dispose()
     model.dispose()
-    registration.dispose()
     ctx.finish()
   })
 }

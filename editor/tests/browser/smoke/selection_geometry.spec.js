@@ -14,6 +14,22 @@ async function mountComponentViewer(page) {
   });
 }
 
+async function copySelection(page) {
+  const editor = page.locator('.monaco-editor.readonly-editor');
+  await editor.evaluate((root) => {
+    root.addEventListener(
+      'copy',
+      (event) => {
+        root.__testCopiedText =
+          event.clipboardData?.getData('text/plain') ?? '';
+      },
+      { once: true },
+    );
+  });
+  await page.keyboard.press('ControlOrMeta+C');
+  return editor.evaluate((root) => root.__testCopiedText ?? '');
+}
+
 // Rects of `.selected-text` overlay nodes whose vertical center falls on the
 // given line box, in viewport coordinates.
 async function selectionRectsOnLine(page, lineBox) {
@@ -178,8 +194,7 @@ test('paints exactly the selected source columns on a projected line', async ({ 
     .poll(() => page.locator('.selected-text').count(), { timeout: 2_000 })
     .toBeGreaterThan(0);
 
-  await page.keyboard.press('ControlOrMeta+C');
-  const copiedText = await page.evaluate(() => globalThis.__readonlyEditorCopiedText || '');
+  const copiedText = await copySelection(page);
   expect(copiedText.length).toBeGreaterThan(3);
   expect(copiedText).not.toContain('\n'); // single-line selection
 

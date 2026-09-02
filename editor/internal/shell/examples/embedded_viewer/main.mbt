@@ -754,18 +754,8 @@ fn set_embed_diff_options(inline : Bool, sash_enabled : Bool) -> @rabbita.Cmd {
 }
 
 ///|
-/// Production delegates directly to the native browser rAF queue. The
-/// optional global hook lets the embed smoke test hold only this host-ready
-/// callback while the Viewer's own render rAF continues normally.
 extern "js" fn embed_ready_animation_frame(callback : () -> Unit) -> Unit =
-  #| (callback) => {
-  #|   const testHook = globalThis.__embeddedReadyAnimationFrame;
-  #|   if (typeof testHook === 'function') {
-  #|     testHook(callback);
-  #|     return;
-  #|   }
-  #|   globalThis.requestAnimationFrame(callback);
-  #| }
+  #| (callback) => { globalThis.requestAnimationFrame(callback); }
 
 ///|
 let embed_tree_cell : Ref[@file_tree.FileTree?] = Ref(None)

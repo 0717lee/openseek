@@ -72,7 +72,7 @@ jobs:
 
   # Browser correctness owns the editor asset pipeline and Playwright suites.
   # It stays on macOS because the maintained geometry expectations use macOS
-  # font defaults; the performance profile remains an opt-in local diagnostic.
+  # font defaults.
   browser-correctness:
     runs-on: macos-latest
     timeout-minutes: 30

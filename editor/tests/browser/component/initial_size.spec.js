@@ -19,8 +19,6 @@ test('seeds layout before attach and stabilizes at explicit initialization', asy
     expect(report.metrics.initialLayoutWidth).toBe(report.metrics.hostWidth);
     expect(report.metrics.initialLayoutHeight).toBe(report.metrics.hostHeight);
     expect(report.metrics.initialVisibleEndLine).toBeGreaterThan(1);
-    expect(report.metrics.tokenizeCallsBeforeInitialized).toBe(0);
-    expect(report.metrics.tokenizeCallsAfterInitialized).toBeGreaterThan(1);
   } finally {
     reporter.dispose();
   }

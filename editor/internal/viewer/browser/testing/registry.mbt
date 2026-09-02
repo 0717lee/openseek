@@ -8,7 +8,6 @@ priv struct ViewerTestingEntry {
   did_build_view_model : @base_common.Emitter[ViewModelBuiltObservation]
   did_render_model : @base_common.Emitter[ModelRenderedObservation]
   did_resolve_hover : @base_common.Emitter[HoverResolvedObservation]
-  did_observe_scroll_frame : @base_common.Emitter[ScrollFrameObservation]
 }
 
 ///|
@@ -22,7 +21,6 @@ fn ViewerTestingEntry::dispose(self : ViewerTestingEntry) -> Unit {
   self.did_build_view_model.dispose()
   self.did_render_model.dispose()
   self.did_resolve_hover.dispose()
-  self.did_observe_scroll_frame.dispose()
 }
 
 ///|
@@ -54,12 +52,8 @@ pub fn register_viewer(
     did_build_view_model: Emitter(),
     did_render_model: Emitter(),
     did_resolve_hover: Emitter(),
-    did_observe_scroll_frame: Emitter(),
   }
   offer_browser_hidden_lines_diagnostic(set_hidden_lines_for_browser_diagnostic)
-  offer_browser_scroll_frame_diagnostic(
-    viewer_id, subscribe_scroll_frames_for_browser_diagnostic,
-  )
   @base_common.Disposable::from(() => {
     unregister_if_current(viewer_id, registration_id)
   })
@@ -124,51 +118,6 @@ extern "js" fn offer_browser_hidden_lines_diagnostic(
   #| (setHiddenLines) => globalThis.__viewerPrivateTestProbe?.acceptSetHiddenLines?.(setHiddenLines)
 
 ///|
-/// Installs the scroll-frame listener only when the browser performance probe
-/// already exists. Product hosts cross this bridge once during registration
-/// and retain the publisher's no-listener fast path for every later frame.
-fn subscribe_scroll_frames_for_browser_diagnostic(viewer_id : String) -> Unit {
-  on_did_observe_scroll_frame(viewer_id, event => {
-    forward_scroll_frame_for_browser_diagnostic(
-      event.viewer_id,
-      match event.phase {
-        StateCommitted => "state-committed"
-        RenderStarted => "render-started"
-        RenderFinished => "render-finished"
-      },
-      event.scroll_top,
-      event.scroll_left,
-    )
-  })
-  |> ignore
-}
-
-///|
-extern "js" fn offer_browser_scroll_frame_diagnostic(
-  viewer_id : String,
-  subscribe : (String) -> Unit,
-) -> Unit =
-  #| (viewerId, subscribe) => {
-  #|   if (globalThis.__scrollProbe) subscribe(viewerId);
-  #| }
-
-///|
-extern "js" fn forward_scroll_frame_for_browser_diagnostic(
-  viewer_id : String,
-  phase : String,
-  scroll_top : Double,
-  scroll_left : Double,
-) -> Unit =
-  #| (viewerId, phase, scrollTop, scrollLeft) => {
-  #|   globalThis.__scrollProbe?.recordLocalPhase({
-  #|     viewerId,
-  #|     phase,
-  #|     scrollTop,
-  #|     scrollLeft,
-  #|   });
-  #| }
-
-///|
 /// Subscribes to view-model-build observations for one registered viewer.
 /// Missing or unregistered ids return an inert disposable.
 pub fn on_did_build_view_model(
@@ -208,19 +157,6 @@ pub fn on_did_resolve_hover(
 }
 
 ///|
-/// Subscribes to ordered scroll state/render observations for one registered
-/// viewer. Missing or unregistered ids return an inert disposable.
-fn on_did_observe_scroll_frame(
-  viewer_id : String,
-  listener : (ScrollFrameObservation) -> Unit,
-) -> @base_common.Disposable {
-  match viewer_entries.get(viewer_id) {
-    Some(entry) => entry.did_observe_scroll_frame.event(listener)
-    None => @base_common.Disposable::from(() => ())
-  }
-}
-
-///|
 /// Publishes one view-model-build observation to the matching live viewer.
 pub fn publish_view_model_built(
   viewer_id : String,
@@ -253,26 +189,5 @@ pub fn publish_hover_resolved(
   match viewer_entries.get(viewer_id) {
     Some(entry) => entry.did_resolve_hover.fire(observation)
     None => ()
-  }
-}
-
-///|
-/// Publishes one scroll phase to the matching live viewer. The observation
-/// record is deliberately constructed only when that viewer has a listener.
-pub fn publish_scroll_frame(
-  viewer_id : String,
-  phase : ScrollFramePhase,
-  scroll_top : Double,
-  scroll_left : Double,
-) -> Unit {
-  match viewer_entries.get(viewer_id) {
-    Some(entry) if entry.did_observe_scroll_frame.has_listeners() =>
-      entry.did_observe_scroll_frame.fire({
-        viewer_id,
-        phase,
-        scroll_top,
-        scroll_left,
-      })
-    _ => ()
   }
 }

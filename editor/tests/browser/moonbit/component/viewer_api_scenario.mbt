@@ -224,7 +224,9 @@ fn poll_rendered(
   // after the first default-token paint. Wait for the token-driven repaint,
   // rather than treating the intentionally passive first read as final.
   let has_keyword_tokens = @support.query_count(".mtk3") > 0
-  if text.contains("component_answer") && has_keyword_tokens {
+  if text is Some(text) &&
+    text.contains("component_answer") &&
+    has_keyword_tokens {
     ctx.assert_true(
       rendered_count.val > 0,
       "viewer did not emit a rendered notification",
@@ -240,7 +242,7 @@ fn poll_rendered(
     )
     ctx.assert_true(
       @support.query_attribute(".monaco-editor.readonly-editor", "data-theme") ==
-      "dark",
+      Some("dark"),
       "viewer did not mirror the dark theme onto its root",
     )
     // Monaco's `LineNumbersOverlay`: a number renders only on a model line's

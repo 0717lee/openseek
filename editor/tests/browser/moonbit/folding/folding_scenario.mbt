@@ -56,7 +56,7 @@ fn wait_for_text(
   needle : String,
   remaining : Int,
 ) -> Unit {
-  if @support.query_text(".viewer-host").contains(needle) {
+  if @support.query_text(".viewer-host") is Some(text) && text.contains(needle) {
     // Two indent regions → two expanded chevrons in the `.cldr` lane
     // (opacity 0 under `showFoldingControls: mouseover`, but present).
     let expanded_count = @support.query_count(
@@ -77,9 +77,11 @@ fn wait_for_text(
     return
   }
   if remaining <= 0 {
-    ctx.fail(
-      "timed out waiting for text: \{needle} (saw: \{@support.query_text(".viewer-host")})",
-    )
+    let saw = match @support.query_text(".viewer-host") {
+      Some(text) => text
+      None => "<missing viewer host>"
+    }
+    ctx.fail("timed out waiting for text: \{needle} (saw: \{saw})")
     ctx.finish()
     return
   }

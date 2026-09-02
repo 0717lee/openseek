@@ -155,7 +155,7 @@ async function press(page, key) {
 
 async function copySelection(page) {
   await page.keyboard.press('ControlOrMeta+C');
-  return page.evaluate(() => globalThis.__readonlyEditorCopiedText || '');
+  return (await copiedPayload(page)).plain;
 }
 
 async function clickBurst(page, point, count) {

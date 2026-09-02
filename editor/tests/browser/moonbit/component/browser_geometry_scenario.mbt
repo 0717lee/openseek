@@ -366,7 +366,6 @@ fn run_browser_geometry_test() -> Unit {
       name => fixture(name).viewer.focus(),
       (name, wide) => fixture(name).set_injected_text(wide),
       (name, enabled) => fixture(name).set_hidden_widest(enabled),
-      name => fixture(name).viewer.fold_top_level(),
       (name, hidden) => {
         browser_geometry_set_hidden_lines(fixture(name).viewer.get_id(), hidden)
       },
@@ -432,12 +431,11 @@ extern "js" fn install_browser_geometry_controls(
   focus : (String) -> Unit,
   set_injected : (String, Bool) -> Unit,
   set_hidden_widest : (String, Bool) -> Unit,
-  fold_top_level : (String) -> Unit,
   set_anchor_hidden : (String, Bool) -> Unit,
   iframe_geometry : () -> String,
 ) -> Unit =
   #| (stateJson, setWrap, setScroll, setPosition, focus, setInjected,
-  #|  setHiddenWidest, foldTopLevel, setAnchorHidden, iframeGeometry) => {
+  #|  setHiddenWidest, setAnchorHidden, iframeGeometry) => {
   #|   globalThis.__browserGeometryControls = Object.freeze({
   #|     state(name, line = 3, column = 6) {
   #|       return JSON.parse(stateJson(name, line, column));
@@ -448,7 +446,6 @@ extern "js" fn install_browser_geometry_controls(
   #|     focus,
   #|     set_injected: setInjected,
   #|     set_hidden_widest: setHiddenWidest,
-  #|     fold_top_level: foldTopLevel,
   #|     set_anchor_hidden: setAnchorHidden,
   #|     iframe_geometry() {
   #|       return JSON.parse(iframeGeometry());

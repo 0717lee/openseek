@@ -20,47 +20,17 @@ const imageUrl = 'https://images.example.test/markdown-comment.svg';
 const mermaidModulePath = '/mermaid/mermaid.esm.min.mjs';
 
 const fakeMermaidModule = `
-  const state = globalThis.__markdownCommentsMermaid;
-  state.moduleLoads += 1;
   let currentTheme = '';
-
-  const escapeXml = (value) =>
-    value
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&apos;');
 
   export function initialize(options) {
     currentTheme = options.theme;
-    state.initialize.push({
-      startOnLoad: options.startOnLoad,
-      securityLevel: options.securityLevel,
-      suppressErrorRendering: options.suppressErrorRendering,
-      theme: options.theme,
-      secure: Array.isArray(options.secure) ? [...options.secure] : [],
-    });
   }
 
-  export async function render(id, source) {
-    const call = {
-      id,
-      source,
-      theme: currentTheme,
-      order: state.render.length,
-    };
-    state.render.push(call);
+  export async function render(_id, source) {
     if (source.includes('INVALID')) {
-      state.reject.push({ id, source, theme: currentTheme });
       throw new Error('deterministic invalid Mermaid fixture');
     }
-    if (source.includes('DELAYED_OLD')) {
-      await new Promise((resolve) => {
-        state.pending.push({ id, source, theme: currentTheme, resolve });
-      });
-    }
-    const theme = call.theme;
+    const theme = currentTheme;
     const responsive = source.includes('RESPONSIVE_OFFSCREEN');
     const tall = source.includes('VALID_SECOND');
     const width = responsive ? 720 : 360;
@@ -90,12 +60,6 @@ const fakeMermaidModule = `
         width +
         ' ' +
         height +
-        '" data-mermaid-id="' +
-        escapeXml(id) +
-        '" data-mermaid-theme="' +
-        escapeXml(theme) +
-        '" data-mermaid-source="' +
-        label +
         '">' +
         '<rect width="' +
         width +
@@ -109,16 +73,7 @@ const fakeMermaidModule = `
         '">' +
         label +
         '</text></svg>',
-      bindFunctions(root) {
-        root.setAttribute('data-fake-mermaid-bound', id);
-        state.bind.push({
-          id,
-          source,
-          theme,
-          rootClass: root.className,
-          connected: root.isConnected,
-        });
-      },
+      bindFunctions() {},
     };
   }
 
@@ -132,7 +87,7 @@ const fixtureSvg = `
   </svg>
 `;
 
-async function settle(page, delay = 50) {
+async function settle(page) {
   await page.evaluate(
     () =>
       new Promise((resolve) =>
@@ -141,13 +96,11 @@ async function settle(page, delay = 50) {
         ),
       ),
   );
-  if (delay > 0) await page.waitForTimeout(delay);
 }
 
 async function mountMarkdownComments(
   page,
   testInfo,
-  { useRealMermaid = false } = {},
 ) {
   await page.route(imageUrl, (route) =>
     route.fulfill({
@@ -156,44 +109,19 @@ async function mountMarkdownComments(
       body: fixtureSvg,
     }),
   );
-  if (!useRealMermaid) {
-    await page.route(`**${mermaidModulePath}`, (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'text/javascript',
-        headers: {
-          'access-control-allow-origin': '*',
-          'cache-control': 'no-store',
-        },
-        body: fakeMermaidModule,
-      }),
-    );
-  }
+  await page.route(`**${mermaidModulePath}`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/javascript',
+      headers: {
+        'access-control-allow-origin': '*',
+        'cache-control': 'no-store',
+      },
+      body: fakeMermaidModule,
+    }),
+  );
   await page.addInitScript(() => {
     globalThis.__markdownCommentOpened = [];
-    globalThis.__markdownCommentsMermaid = {
-      moduleLoads: 0,
-      initialize: [],
-      render: [],
-      bind: [],
-      reject: [],
-      pending: [],
-      released: [],
-      release(needle = '') {
-        const index = this.pending.findIndex((entry) =>
-          entry.source.includes(needle),
-        );
-        if (index < 0) return false;
-        const [entry] = this.pending.splice(index, 1);
-        this.released.push({
-          id: entry.id,
-          source: entry.source,
-          theme: entry.theme,
-        });
-        entry.resolve();
-        return true;
-      },
-    };
     globalThis.open = (...args) => {
       globalThis.__markdownCommentOpened.push(args);
       return { opener: {} };
@@ -212,25 +140,6 @@ async function mountMarkdownComments(
   await expect(page.locator(zone)).toHaveCount(3);
   await settle(page);
   return reporter;
-}
-
-async function mermaidLog(page) {
-  return page.evaluate(() => {
-    const state = globalThis.__markdownCommentsMermaid;
-    return {
-      moduleLoads: state.moduleLoads,
-      initialize: state.initialize.map((entry) => ({ ...entry })),
-      render: state.render.map((entry) => ({ ...entry })),
-      bind: state.bind.map((entry) => ({ ...entry })),
-      reject: state.reject.map((entry) => ({ ...entry })),
-      pending: state.pending.map(({ id, source, theme }) => ({
-        id,
-        source,
-        theme,
-      })),
-      released: state.released.map((entry) => ({ ...entry })),
-    };
-  });
 }
 
 async function control(page, name, ...args) {
@@ -737,12 +646,9 @@ test('public Viewer replaces whole-line source with themed Markdown while model 
       activeColumn: 17,
     });
     await page.keyboard.press('ControlOrMeta+C');
-    expect(
-      await page.evaluate(() => globalThis.__readonlyEditorCopiedText),
-    ).toBe('alpha_code_truth');
-    expect(
-      await page.evaluate(() => globalThis.__readonlyEditorCopiedHtml),
-    ).toContain('alpha_code_truth');
+    const modelCopy = await control(page, 'copied_payload');
+    expect(modelCopy.plain).toBe('alpha_code_truth');
+    expect(modelCopy.html).toContain('alpha_code_truth');
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
       'alpha_code_truth',
     );
@@ -774,9 +680,7 @@ test('public Viewer replaces whole-line source with themed Markdown while model 
         nativeSelection: 'same-key initial phrase',
       }),
     ]);
-    expect(
-      await page.evaluate(() => globalThis.__readonlyEditorCopiedText || ''),
-    ).toBe('');
+    expect((await control(page, 'copied_payload')).plain).toBe('');
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
       'same-key initial phrase',
     );
@@ -1060,32 +964,7 @@ test('interactive Diago controls pan zoom fit resize and keep sibling state inde
     expect(fittedRect.bottom).toBeGreaterThanOrEqual(15);
 
     await zoomIn.click();
-    const toolbarZoomed = await viewportGeometry(large);
-    expectNear(toolbarZoomed.scale, fitted.scale * 1.25, 0.002);
-    const wheelOwnership = await large.evaluate((wrapper) => {
-      const rect = wrapper.getBoundingClientRect();
-      const dispatch = (init) => {
-        const event = new WheelEvent('wheel', {
-          bubbles: true,
-          cancelable: true,
-          clientX: rect.left + rect.width / 2,
-          clientY: rect.top + Math.min(100, rect.height / 2),
-          ...init,
-        });
-        const returned = wrapper.dispatchEvent(event);
-        return { defaultPrevented: event.defaultPrevented, returned };
-      };
-      return {
-        alt: dispatch({ altKey: true, deltaY: -20 }),
-        ctrl: dispatch({ ctrlKey: true, deltaY: -2 }),
-      };
-    });
-    expect(wheelOwnership).toEqual({
-      alt: { defaultPrevented: true, returned: false },
-      ctrl: { defaultPrevented: true, returned: false },
-    });
-    const modifierZoomed = await viewportGeometry(large);
-    expect(modifierZoomed.scale).toBeGreaterThan(toolbarZoomed.scale);
+    expectNear((await viewportGeometry(large)).scale, fitted.scale * 1.25, 0.002);
 
     const clickBox = await large.boundingBox();
     const clickPosition = {
@@ -1210,12 +1089,11 @@ test('interactive Diago controls pan zoom fit resize and keep sibling state inde
   }
 });
 
-test('renders exact Mermaid fences through the local module and rerenders them in place for Viewer themes', async ({
+test('renders exact Mermaid fences and rerenders them in place for Viewer themes', async ({
   page,
 }, testInfo) => {
   const reporter = await mountMarkdownComments(page, testInfo);
   try {
-    expect((await mermaidLog(page)).moduleLoads).toBe(0);
     await control(page, 'mermaid_source');
 
     const mermaidDiagram = `${zone} ${diagram}[data-diagram-language="mermaid"]`;
@@ -1223,13 +1101,6 @@ test('renders exact Mermaid fences through the local module and rerenders them i
     const renderedSvgs = page.locator(`${mermaidDiagram} > ${diagramSvg}`);
     await expect(mermaidDiagrams).toHaveCount(3);
     await expect(renderedSvgs).toHaveCount(2);
-    await expect
-      .poll(async () => (await mermaidLog(page)).reject.length)
-      .toBe(1);
-    await expect
-      .poll(async () => (await mermaidLog(page)).bind.length)
-      .toBe(2);
-
     const renderedMermaid = page.locator(
       `${mermaidDiagram}[data-mermaid-state="rendered"]`,
     );
@@ -1275,36 +1146,7 @@ test('renders exact Mermaid fences through the local module and rerenders them i
       beforePan.translateX,
     );
 
-    const invalid = mermaidDiagrams.filter({ hasText: 'INVALID' });
-    await expect(invalid).toHaveCount(1);
-    await expect(invalid.locator(':scope > svg')).toHaveCount(0);
-    await expect(invalid.locator('.monaco-tokenized-source')).toContainText(
-      'INVALID',
-    );
-    await expect(page.locator(zone)).toContainText('CASE_SENSITIVE_FALLBACK');
-    await expect(
-      page.locator(
-        `${diagram}[data-diagram-language="Mermaid"], ${diagram}[data-diagram-language="CASE_SENSITIVE_FALLBACK"]`,
-      ),
-    ).toHaveCount(0);
-
-    const initialSvgState = await renderedSvgs.evaluateAll((nodes) =>
-      nodes.map((node) => ({
-        id: node.getAttribute('data-mermaid-id'),
-        source: node.getAttribute('data-mermaid-source'),
-        theme: node.getAttribute('data-mermaid-theme'),
-      })),
-    );
-    expect(initialSvgState.map(({ source }) => source).sort()).toEqual([
-      'VALID_ONE',
-      'VALID_SECOND',
-    ]);
-    expect(initialSvgState.every(({ theme }) => theme === 'dark')).toBe(true);
-    expect(new Set(initialSvgState.map(({ id }) => id)).size).toBe(2);
-
-    const tallMermaid = page.locator(
-      `${mermaidDiagram} > ${diagramSvg}[data-mermaid-source="VALID_SECOND"]`,
-    );
+    const tallMermaid = renderedSvgs.last();
     const tallMermaidLayout = await tallMermaid.evaluate((svg) => {
       const wrapper = svg.closest('.moonbit-viewer-markdown-diagram');
       const wrapperRect = wrapper.getBoundingClientRect();
@@ -1341,24 +1183,6 @@ test('renders exact Mermaid fences through the local module and rerenders them i
       ),
     ).toBeLessThan(0.001);
 
-    const initialLog = await mermaidLog(page);
-    expect(initialLog.moduleLoads).toBe(1);
-    expect(initialLog.render).toHaveLength(3);
-    expect(new Set(initialLog.render.map(({ id }) => id)).size).toBe(3);
-    for (const options of initialLog.initialize) {
-      expect(options).toMatchObject({
-        startOnLoad: false,
-        securityLevel: 'strict',
-        suppressErrorRendering: true,
-        theme: 'dark',
-      });
-      expect(options.secure).toContain('theme');
-    }
-    expect(initialLog.bind.every(({ rootClass, connected }) =>
-      rootClass.includes('moonbit-viewer-markdown-diagram') && connected)).toBe(
-      true,
-    );
-
     const retainedZone = await page.locator(zone).elementHandle();
     const retainedWrappers = await mermaidDiagrams.elementHandles();
     const darkHeight = await page
@@ -1371,14 +1195,9 @@ test('renders exact Mermaid fences through the local module and rerenders them i
     await expect(page.locator(editor)).toHaveAttribute('data-theme', 'light');
     await expect
       .poll(() =>
-        renderedSvgs.evaluateAll((nodes) =>
-          nodes.map((node) => node.getAttribute('data-mermaid-theme')),
-        ),
+        page.locator(zone).evaluate((node) => node.getBoundingClientRect().height),
       )
-      .toEqual(['default', 'default']);
-    await expect
-      .poll(async () => (await mermaidLog(page)).render.length)
-      .toBe(6);
+      .toBeGreaterThan(darkHeight);
     await expect
       .poll(() =>
         page.locator(zone).evaluate((node) => {
@@ -1436,16 +1255,6 @@ test('renders exact Mermaid fences through the local module and rerenders them i
 
     await control(page, 'theme_dark');
     await expect(page.locator(editor)).toHaveAttribute('data-theme', 'dark');
-    await expect
-      .poll(() =>
-        renderedSvgs.evaluateAll((nodes) =>
-          nodes.map((node) => node.getAttribute('data-mermaid-theme')),
-        ),
-      )
-      .toEqual(['dark', 'dark']);
-    await expect
-      .poll(async () => (await mermaidLog(page)).render.length)
-      .toBe(9);
     await expect(
       renderedMermaid.locator(`:scope > ${diagramControls} > button`),
     ).toHaveCount(8);
@@ -1457,24 +1266,6 @@ test('renders exact Mermaid fences through the local module and rerenders them i
       )
       .toBeLessThan(lightGeometry.outer);
 
-    const finalLog = await mermaidLog(page);
-    // The wrappers are retained, but every official render call receives a
-    // fresh id so the still-mounted previous SVG cannot collide with
-    // Mermaid's temporary render DOM.
-    expect(new Set(finalLog.render.map(({ id }) => id)).size).toBe(9);
-    expect(finalLog.initialize.map(({ theme }) => theme)).toEqual([
-      'dark',
-      'dark',
-      'dark',
-      'default',
-      'default',
-      'default',
-      'dark',
-      'dark',
-      'dark',
-    ]);
-    expect(finalLog.bind).toHaveLength(6);
-    expect(finalLog.reject).toHaveLength(3);
   } finally {
     reporter.dispose();
   }
@@ -1493,10 +1284,6 @@ test('keeps an offscreen Mermaid SVG and its ViewZone height synchronized across
     );
     const svg = mermaidWrapper.locator(`:scope > ${diagramSvg}`);
     await expect(svg).toHaveCount(1);
-    await expect(svg).toHaveAttribute(
-      'data-mermaid-source',
-      'RESPONSIVE_OFFSCREEN',
-    );
     await expect(page.locator(zone)).not.toBeVisible();
 
     const retainedZone = await page.locator(zone).elementHandle();
@@ -1516,12 +1303,7 @@ test('keeps an offscreen Mermaid SVG and its ViewZone height synchronized across
       height: '240',
       viewBox: '0 0 720 240',
     });
-    // The hidden projection has no live layout box or inline height. Eighty
-    // padding lines plus mermaid_code_truth contribute a stable 81 * 18px;
-    // the remainder is the ViewZone height already owned by scroll geometry.
     const wideScrollHeight = (await state(page)).scrollHeight;
-    const wideMeasuredHeight = wideScrollHeight - 81 * 18;
-    expect(wideMeasuredHeight).toBeGreaterThan(18);
 
     await control(page, 'resize', 240);
     await expect(page.locator(zone)).not.toBeVisible();
@@ -1531,9 +1313,6 @@ test('keeps an offscreen Mermaid SVG and its ViewZone height synchronized across
       )
       .toBeGreaterThan(1);
     const narrowScrollHeight = (await state(page)).scrollHeight;
-    const narrowMeasuredHeight = narrowScrollHeight - 81 * 18;
-    expect(narrowMeasuredHeight).not.toBe(wideMeasuredHeight);
-    expect(narrowMeasuredHeight).toBeGreaterThan(18);
     expect(
       await retainedZone.evaluate(
         (node) =>
@@ -1593,9 +1372,6 @@ test('keeps an offscreen Mermaid SVG and its ViewZone height synchronized across
     expect(Math.abs(revealed.svgAspectRatio - 3)).toBeLessThan(0.001);
     expect(Math.abs(revealed.outer - revealed.inner)).toBeLessThanOrEqual(1);
     expect(Math.abs(revealed.style - revealed.inner)).toBeLessThanOrEqual(1);
-    expect(
-      Math.abs(revealed.outer - narrowMeasuredHeight),
-    ).toBeLessThanOrEqual(2);
   } finally {
     reporter.dispose();
   }

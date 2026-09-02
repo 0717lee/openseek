@@ -6,7 +6,7 @@ export { expect };
 export const test = base.extend({
   page: async ({ page }, use, testInfo) => {
     const logger = createTestLogger(testInfo);
-    const removePageLogging = installPageLogging(page, logger);
+    const pageLogging = installPageLogging(page, logger);
     const started = Date.now();
     logger.log({
       level: 'info',
@@ -16,6 +16,7 @@ export const test = base.extend({
     });
     try {
       await withLoggedOperation(logger, 'test', 'body', () => use(page));
+      pageLogging.assertClean();
       logger.log({
         level: 'info',
         category: 'test',
@@ -44,7 +45,7 @@ export const test = base.extend({
       });
       throw error;
     } finally {
-      removePageLogging();
+      pageLogging.remove();
       logger.flush();
     }
   },

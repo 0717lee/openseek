@@ -147,23 +147,12 @@ fn run_render_invalidation_test() -> Unit {
   |> ignore
   let spacing_ids : Ref[Array[String]] = Ref([])
   let token_registration : Ref[@base_common.Disposable?] = Ref(None)
-  let zone_generation = Ref(0)
-  let first_zone_top_count = Ref(0)
-  let second_zone_top_count = Ref(0)
-  let zone_node = document.create_element("div")
-  zone_node.set_attribute("data-zone-generation", "1")
-  zone_node.set_inner_html("zone-1")
-  let zone_delegate = @viewer.view_zone(2, zone_node, height_in_px=18.0, on_dom_node_top=_ => {
-    first_zone_top_count.val += 1
-  })
-  let zone_id = Ref("")
   guard viewer.get_dom_node() is Some(root) else {
     ctx.fail("viewer did not expose its root DOM node")
     ctx.finish()
     return
   }
   install_render_invalidation_controls(
-    root,
     mode => {
       match mode {
         "none" =>
@@ -217,25 +206,6 @@ fn run_render_invalidation_test() -> Unit {
     () => render_invalidation_position_json(viewer),
     () => viewer.focus(),
     () => {
-      zone_generation.val += 1
-      let generation = zone_generation.val
-      if generation == 1 {
-        viewer.change_view_zones(accessor => {
-          zone_id.val = accessor.add_zone(zone_delegate)
-        })
-      } else {
-        // `layout_zone` rereads mutable geometry and callbacks but retains the
-        // insertion-time DOM node, ordinal, and minimum width.
-        zone_delegate.on_dom_node_top = Some(_ => second_zone_top_count.val += 1)
-        zone_delegate.after_line_number = 2
-        zone_delegate.height_in_px = Some(18.0)
-        viewer.change_view_zones(accessor => accessor.layout_zone(zone_id.val))
-      }
-    },
-    () => {
-      "{\"first\":\{first_zone_top_count.val},\"second\":\{second_zone_top_count.val}}"
-    },
-    () => {
       if token_registration.val is Some(registration) {
         registration.dispose()
       }
@@ -278,51 +248,16 @@ fn poll_render_invalidation_ready(
 
 ///|
 extern "js" fn install_render_invalidation_controls(
-  root : @rdom.Element,
   set_whitespace : (String) -> Unit,
   set_control : (Bool) -> Unit,
   add_spacing_decoration : () -> Unit,
   remove_spacing_decoration : () -> Unit,
   position_json : () -> String,
   focus : () -> Unit,
-  replace_zone : () -> Unit,
-  zone_counts_json : () -> String,
   recolor_tokens : () -> Unit,
 ) -> Unit =
-  #| (root, setWhitespace, setControl, addSpacingDecoration,
-  #|  removeSpacingDecoration, positionJson, focus, replaceZone,
-  #|  zoneCountsJson, recolorTokens) => {
-  #|   let originalRequestAnimationFrame = null;
-  #|   let animationFrameCount = 0;
-  #|   let mutationCount = 0;
-  #|   let mutationTargets = [];
-  #|   let writeTargets = [];
-  #|   let observer = null;
-  #|   let originalSetAttribute = null;
-  #|   let originalSetProperty = null;
-  #|   const stopProbe = () => {
-  #|     const result = {
-  #|       frames: animationFrameCount,
-  #|       mutations: mutationCount,
-  #|       targets: [...new Set(mutationTargets)],
-  #|       writes: [...new Set(writeTargets)],
-  #|     };
-  #|     if (originalRequestAnimationFrame) {
-  #|       window.requestAnimationFrame = originalRequestAnimationFrame;
-  #|       originalRequestAnimationFrame = null;
-  #|     }
-  #|     if (originalSetAttribute) {
-  #|       Element.prototype.setAttribute = originalSetAttribute;
-  #|       originalSetAttribute = null;
-  #|     }
-  #|     if (originalSetProperty) {
-  #|       CSSStyleDeclaration.prototype.setProperty = originalSetProperty;
-  #|       originalSetProperty = null;
-  #|     }
-  #|     observer?.disconnect();
-  #|     observer = null;
-  #|     return result;
-  #|   };
+  #| (setWhitespace, setControl, addSpacingDecoration,
+  #|  removeSpacingDecoration, positionJson, focus, recolorTokens) => {
   #|   globalThis.__renderInvalidationControls = {
   #|     set_whitespace: setWhitespace,
   #|     set_control: setControl,
@@ -330,59 +265,6 @@ extern "js" fn install_render_invalidation_controls(
   #|     remove_spacing_decoration: removeSpacingDecoration,
   #|     position: () => JSON.parse(positionJson()),
   #|     focus,
-  #|     replace_zone: replaceZone,
-  #|     zone_counts: () => JSON.parse(zoneCountsJson()),
   #|     recolor_tokens: recolorTokens,
-  #|     start_probe: () => {
-  #|       if (originalRequestAnimationFrame || observer) stopProbe();
-  #|       animationFrameCount = 0;
-  #|       mutationCount = 0;
-  #|       mutationTargets = [];
-  #|       writeTargets = [];
-  #|       originalRequestAnimationFrame = window.requestAnimationFrame.bind(window);
-  #|       window.requestAnimationFrame = (callback) => {
-  #|         animationFrameCount += 1;
-  #|         return originalRequestAnimationFrame(callback);
-  #|       };
-  #|       originalSetAttribute = Element.prototype.setAttribute;
-  #|       Element.prototype.setAttribute = function(name, value) {
-  #|         if (name === 'style' && this.matches('.cursor')) {
-  #|           writeTargets.push('cursor');
-  #|         }
-  #|         if (name === 'style' && this.hasAttribute('data-content-widget')) {
-  #|           writeTargets.push('contentWidget');
-  #|         }
-  #|         return originalSetAttribute.call(this, name, value);
-  #|       };
-  #|       originalSetProperty = CSSStyleDeclaration.prototype.setProperty;
-  #|       CSSStyleDeclaration.prototype.setProperty = function(name, value, priority) {
-  #|         const cursor = root.querySelector('.cursor');
-  #|         const widget = root.querySelector('[data-content-widget]');
-  #|         if (cursor && this === cursor.style) writeTargets.push('cursor');
-  #|         if (widget && this === widget.style) writeTargets.push('contentWidget');
-  #|         return originalSetProperty.call(this, name, value, priority);
-  #|       };
-  #|       observer = new MutationObserver((records) => {
-  #|         mutationCount += records.length;
-  #|         for (const record of records) {
-  #|           const target = record.target;
-  #|           if (!(target instanceof Element)) continue;
-  #|           if (target.matches('.cursor')) mutationTargets.push('cursor');
-  #|           if (target.hasAttribute('data-content-widget')) {
-  #|             mutationTargets.push('contentWidget');
-  #|           }
-  #|           if (target.matches('.view-line, .view-lines') || target.closest('.view-line')) {
-  #|             mutationTargets.push('viewLine');
-  #|           }
-  #|         }
-  #|       });
-  #|       observer.observe(root, {
-  #|         subtree: true,
-  #|         childList: true,
-  #|         attributes: true,
-  #|         characterData: true,
-  #|       });
-  #|     },
-  #|     stop_probe: stopProbe,
   #|   };
   #| }

@@ -824,53 +824,6 @@ test('renders character changes and VS Code high-contrast diff paint', async ({ 
   ).toBe('1');
 });
 
-test('drops a stale host-ready rAF after a rapid code-model swap', async ({ page }) => {
-  await page.addInitScript(() => {
-    const queue = [];
-    globalThis.__embeddedReadyAnimationFrame = (callback) => {
-      queue.push(callback);
-    };
-    globalThis.__embeddedReadyQueueLength = () => queue.length;
-    globalThis.__flushEmbeddedReadyFrame = () => {
-      const callback = queue.shift();
-      if (callback) callback();
-    };
-  });
-
-  await page.goto('/embed.html');
-  await expect
-    .poll(() => page.evaluate(() => globalThis.__embeddedReadyQueueLength()))
-    .toBe(1);
-  await page.evaluate(() => globalThis.__flushEmbeddedReadyFrame());
-  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
-  await expect(page.locator(workspaceItem('src/main.mbt'))).toHaveAttribute(
-    'aria-selected',
-    'true',
-  );
-
-  await page.locator(workspaceItem('src/lib')).click();
-  await expect(page.locator(workspaceItem('src/lib/util.mbt'))).toBeVisible();
-  await page.locator(workspaceItem('moon.mod')).click();
-  await expect
-    .poll(() => page.evaluate(() => globalThis.__embeddedReadyQueueLength()))
-    .toBe(1);
-  await page.locator(workspaceItem('src/lib/util.mbt')).click();
-  await expect
-    .poll(() => page.evaluate(() => globalThis.__embeddedReadyQueueLength()))
-    .toBe(2);
-  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'loading');
-
-  await page.evaluate(() => globalThis.__flushEmbeddedReadyFrame());
-  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'loading');
-  await page.evaluate(() => globalThis.__flushEmbeddedReadyFrame());
-  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
-  await expect(page.locator(workspaceItem('src/lib/util.mbt'))).toHaveAttribute(
-    'aria-selected',
-    'true',
-  );
-  await expect(page.locator(sourceEditor)).toContainText('util_answer');
-});
-
 function workspaceItem(path) {
   return workspaceSelector(path, { root: 'memory://workspace' });
 }

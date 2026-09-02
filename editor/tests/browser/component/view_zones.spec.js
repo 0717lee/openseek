@@ -6,14 +6,15 @@ import {
 
 const host = '.view-zones-host';
 
-async function settle(page, delay = 80) {
+async function settle(page) {
   await page.evaluate(
     () =>
       new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        ),
       ),
   );
-  if (delay > 0) await page.waitForTimeout(delay);
 }
 
 async function mountViewZones(page, testInfo) {
@@ -230,7 +231,7 @@ async function mouseDownAt(page, point, button = 'left') {
   await page.mouse.move(point.x, point.y);
   await page.mouse.down({ button });
   await page.mouse.up({ button });
-  await page.waitForTimeout(30);
+  await settle(page);
 }
 
 test('ViewZone suppressMouseDown is live for content and gutter hits', async ({
