@@ -24,10 +24,10 @@ priv suberror TerminalPumpClosed {
 /// the session drained.
 pub(all) enum TerminalPush {
   /// `sequence` identifies this output chunk within one session. The webview
-  /// echoes it in `terminal_ack`, making retries safe when a bridge response
-  /// is lost after the host already applied the acknowledgement.
-  Output(id~ : Int, sequence~ : Int, data~ : Bytes)
-  Exited(id~ : Int, code~ : Int)
+  /// echoes the latest rendered value in `terminal_ack`; acknowledging a
+  /// sequence also acknowledges every earlier outstanding chunk.
+  Output(id~ : String, sequence~ : Int, data~ : Bytes)
+  Exited(id~ : String, code~ : Int)
 }
 
 ///|
@@ -37,18 +37,82 @@ pub(all) enum TerminalPush {
 const HighWatermark = 262144
 
 ///|
-/// Resume reading once acknowledgements bring the debt below this.
-const LowWatermark = 65536
+/// Outstanding output for one terminal. Acknowledgements are cumulative so a
+/// later successful request covers earlier requests that did not reach the
+/// host. An unknown future sequence remains a no-op instead of releasing data
+/// the client has not demonstrated it received.
+priv struct TerminalOutputWindow {
+  mut unacked : Int
+  // Byte counts in sequence order. The first outstanding sequence is
+  // `next_sequence - chunks.length()`, so no sequence-to-size map is needed.
+  chunks : @deque.Deque[Int]
+  mut next_sequence : Int
+}
+
+///|
+/// Record one emitted chunk before it becomes visible to the client and
+/// return its monotonically increasing sequence.
+fn TerminalOutputWindow::record(
+  self : TerminalOutputWindow,
+  bytes : Int,
+) -> Int {
+  let sequence = self.next_sequence
+  self.next_sequence += 1
+  self.chunks.push_back(bytes)
+  self.unacked += bytes
+  sequence
+}
+
+///|
+/// Release `sequence` and every earlier outstanding chunk. The result tells
+/// the blocked reader whether the bounded window has capacity again.
+fn TerminalOutputWindow::acknowledge_through(
+  self : TerminalOutputWindow,
+  sequence : Int,
+) -> Bool {
+  let first_sequence = self.next_sequence - self.chunks.length()
+  let acknowledged_chunks = sequence - first_sequence + 1
+  guard acknowledged_chunks > 0 && acknowledged_chunks <= self.chunks.length() else {
+    return false
+  }
+  for bytes in self.chunks.drain(start=0, len=acknowledged_chunks) {
+    self.unacked -= bytes
+  }
+  self.unacked < HighWatermark
+}
+
+///|
+test "a later terminal acknowledgement advances the output window" {
+  let window : TerminalOutputWindow = {
+    unacked: 0,
+    chunks: Deque([]),
+    next_sequence: 1,
+  }
+  for sequence in 1..<=16 {
+    assert_eq(window.record(16384), sequence)
+  }
+  assert_eq(window.unacked, HighWatermark)
+  // A successful acknowledgement before four missing tail requests frees
+  // capacity immediately; the reader can emit another chunk whose later
+  // cumulative acknowledgement retires the whole missing suffix.
+  assert_true(window.acknowledge_through(12))
+  assert_eq(window.unacked, 65536)
+  assert_eq(window.chunks.length(), 4)
+  assert_eq(window.record(16384), 17)
+  assert_true(window.acknowledge_through(17))
+  assert_eq(window.unacked, 0)
+  assert_true(window.chunks.is_empty())
+  // Duplicate and invented future acknowledgements cannot release anything.
+  assert_false(window.acknowledge_through(17))
+  assert_eq(window.record(16384), 18)
+  assert_false(window.acknowledge_through(19))
+  assert_eq(window.unacked, 16384)
+}
 
 ///|
 priv struct TerminalSession {
   pty : @pty.Pty
-  /// Bytes emitted to the webview but not yet acknowledged.
-  mut unacked : Int
-  /// Each sequence remains here until its acknowledgement is applied. Removing
-  /// it exactly once makes a retried acknowledgement idempotent.
-  unacked_chunks : Map[Int, Int]
-  mut next_output_sequence : Int
+  output : TerminalOutputWindow
   /// Wakes the session's read loop when acknowledgements drain the debt or
   /// the session starts closing.
   cond : @cond_var.Cond
@@ -60,7 +124,7 @@ priv struct TerminalSession {
 
 ///|
 priv struct OpenRequest {
-  id : Int
+  id : String
   /// The page connection that submitted this request. A later connect
   /// handshake invalidates it even if the pump has already dequeued it.
   connection_generation : Int
@@ -78,8 +142,7 @@ priv struct OpenRequest {
 /// spawns, the table of live sessions, and the current page connection.
 struct TerminalState {
   requests : @async.Queue[OpenRequest]
-  sessions : Map[Int, TerminalSession]
-  mut next_id : Int
+  sessions : Map[String, TerminalSession]
   /// Once closed, this state cannot serve another connection. Page reconnects
   /// use `close_all_terminals` instead and leave the pump available.
   mut closed : Bool
@@ -93,7 +156,6 @@ pub fn new_terminal_state() -> TerminalState {
   {
     requests: Queue(kind=Unbounded),
     sessions: Map([]),
-    next_id: 1,
     closed: false,
     connection_generation: 0,
   }
@@ -112,11 +174,12 @@ pub async fn open_terminal(
   cols~ : Int,
   rows~ : Int,
   command? : Array[String],
-) -> Int {
+) -> String {
   guard !state.closed else { raise TerminalError("terminal service is closed") }
   let argv = session_argv(command?)
-  let id = state.next_id
-  state.next_id = id + 1
+  guard @uuid.mint() is Some(id) else {
+    raise TerminalError("could not create a terminal id")
+  }
   let reply : @async.Queue[Result[Unit, String]] = Queue(kind=Blocking(1))
   state.requests.put({
     id,
@@ -140,7 +203,7 @@ pub async fn open_terminal(
 /// Write user input (already encoded as terminal input bytes) to a session.
 pub async fn write_terminal(
   state : TerminalState,
-  id~ : Int,
+  id~ : String,
   data : Bytes,
 ) -> Unit {
   guard state.sessions.get(id) is Some(session) else {
@@ -156,7 +219,7 @@ pub async fn write_terminal(
 /// Propagate a webview-side viewport change to the PTY.
 pub fn resize_terminal(
   state : TerminalState,
-  id~ : Int,
+  id~ : String,
   cols~ : Int,
   rows~ : Int,
 ) -> Unit raise {
@@ -169,18 +232,16 @@ pub fn resize_terminal(
 }
 
 ///|
-/// Acknowledge one output chunk the webview has finished rendering. A sequence
-/// is removed at most once, so retrying after a lost bridge response cannot
-/// double-release the flow-control window.
-pub fn ack_terminal(state : TerminalState, id~ : Int, sequence~ : Int) -> Unit {
+/// Acknowledge every output chunk through the latest sequence the webview has
+/// rendered. A later acknowledgement covers an earlier request that failed to
+/// reach the host; duplicates and out-of-order older requests remain no-ops.
+pub fn ack_terminal(
+  state : TerminalState,
+  id~ : String,
+  sequence~ : Int,
+) -> Unit {
   guard state.sessions.get(id) is Some(session) else { return }
-  guard session.unacked_chunks.get(sequence) is Some(bytes) else { return }
-  session.unacked_chunks.remove(sequence)
-  session.unacked -= bytes
-  if session.unacked < 0 {
-    session.unacked = 0
-  }
-  if session.unacked < LowWatermark {
+  if session.output.acknowledge_through(sequence) {
     session.cond.signal()
   }
 }
@@ -190,7 +251,7 @@ pub fn ack_terminal(state : TerminalState, id~ : Int, sequence~ : Int) -> Unit {
 /// output tasks together; the PTY then closes its controlling handle, allows a
 /// bounded graceful exit, and releases its native resources before `Exited`.
 /// Unknown ids are a no-op (already exited).
-pub fn close_terminal(state : TerminalState, id~ : Int) -> Unit {
+pub fn close_terminal(state : TerminalState, id~ : String) -> Unit {
   guard state.sessions.get(id) is Some(session) else { return }
   guard !session.closing else { return }
   session.closing = true

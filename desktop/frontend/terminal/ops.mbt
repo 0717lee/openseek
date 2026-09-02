@@ -3,17 +3,14 @@
 // reply back into the update loop; the steady-state ops are fire-and-forget
 // — input failures surface as `InputFailed` (an error toast),
 // resize/close failures are dropped (their loss only degrades, and a dead
-// session reports itself through `terminal_exit`). Flow-control acks retry
-// until the host accepts their idempotent output sequence.
-
-///|
-const AckRetryDelayMs = 100
+// session reports itself through `terminal_exit`). Flow-control acks are sent
+// once after xterm renders their output sequence.
 
 ///|
 fn open_session(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
-  key : Int,
+  key : String,
   session : String,
   workspace : @common.Uri?,
   cols : Int,
@@ -50,7 +47,7 @@ fn open_session(
 fn send_input(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
-  id : Int,
+  id : String,
   data : String,
   binary : Bool,
 ) -> @cmd.Cmd {
@@ -85,11 +82,11 @@ fn send_input(
 ///|
 fn send_resize(
   channel : @interop.ChannelId,
-  id : Int,
+  id : String,
   cols : Int,
   rows : Int,
 ) -> @cmd.Cmd {
-  @cmd.custom_cmd(_scheduler => {
+  @cmd.custom_cmd(_ => {
     @js.async_run(() => {
       ignore(
         @interop.bridge_request(channel, @commands.terminal_resize, {
@@ -105,34 +102,26 @@ fn send_resize(
 }
 
 ///|
-/// One output acknowledgement. Within its owning connection, retrying the
-/// same session/sequence pair is safe because the host removes each
-/// outstanding sequence at most once.
+/// One output acknowledgement, sent after xterm has rendered the chunk. The
+/// host treats `sequence` cumulatively, so a later successful acknowledgement
+/// also covers this one if the request does not reach the host; no retry timer
+/// is needed.
 priv struct TerminalAck {
   channel : @interop.ChannelId
-  id : Int
+  id : String
   sequence : Int
 }
 
 ///|
 fn TerminalAck::send(self : TerminalAck) -> @cmd.Cmd {
-  @cmd.custom_cmd(_scheduler => {
+  @cmd.custom_cmd(_ => {
     @js.async_run(() => {
       ignore(
         @interop.bridge_request(self.channel, @commands.terminal_ack, {
           id: self.id,
           sequence: self.sequence,
         }) catch {
-          _ => {
-            // The in-process bridge keeps one terminal-id namespace, so a lost
-            // reply is safe to retry there. A remote WebSocket failure ends the
-            // namespace together with all of its PTYs; replaying this id after
-            // reconnect could acknowledge an unrelated new terminal.
-            if self.channel is @interop.ChannelId::Local {
-              _scheduler.add(@cmd.delay(self.send(), AckRetryDelayMs))
-            }
-            return
-          }
+          _ => return
         },
       )
     })
@@ -140,8 +129,8 @@ fn TerminalAck::send(self : TerminalAck) -> @cmd.Cmd {
 }
 
 ///|
-fn send_close(channel : @interop.ChannelId, id : Int) -> @cmd.Cmd {
-  @cmd.custom_cmd(_scheduler => {
+fn send_close(channel : @interop.ChannelId, id : String) -> @cmd.Cmd {
+  @cmd.custom_cmd(_ => {
     @js.async_run(() => {
       ignore(
         @interop.bridge_request(channel, @commands.terminal_close, { id, }) catch {

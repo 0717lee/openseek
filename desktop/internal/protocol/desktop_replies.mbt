@@ -1521,8 +1521,21 @@ pub impl FromJson for BrowseDirectoryReply with fn from_json(json, path) {
 
 ///|
 pub(all) struct TerminalOpenReply {
-  id : Int
-} derive(Debug, Eq, FromJson, ToJson)
+  id : String
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for TerminalOpenReply with fn from_json(json, path) {
+  guard json is Object(fields) && fields.get("id") is Some(String(id)) else {
+    raise JsonDecodeError((path, "expected terminal open reply"))
+  }
+  { id, }
+}
+
+///|
+pub impl ToJson for TerminalOpenReply with fn to_json(self) {
+  { "id": self.id }
+}
 
 ///|
 pub(all) struct MoonIdeLocation {

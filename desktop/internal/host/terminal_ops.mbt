@@ -1,6 +1,7 @@
 // The integrated terminal's transport-independent host ops. PTY output stays
 // byte-transparent across JSON by using base64; each emitted chunk also has a
-// per-session sequence so a client can retry an acknowledgement safely.
+// per-session sequence so a later acknowledgement can cumulatively cover an
+// earlier request that did not reach the host.
 
 ///|
 type TerminalOpenPayload = @protocol.TerminalOpenPayload
@@ -36,14 +37,14 @@ type TerminalClosePayload = @protocol.TerminalClosePayload
 
 ///|
 priv struct TerminalOutputPayload {
-  id : Int
+  id : String
   sequence : Int
   data : String
 }
 
 ///|
 priv struct TerminalExitPayload {
-  id : Int
+  id : String
   code : Int
 }
 

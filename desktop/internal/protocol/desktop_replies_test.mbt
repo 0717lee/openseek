@@ -1409,6 +1409,49 @@ test "a reconnect settlement is refused unless it names run, session and outcome
 }
 
 ///|
+test "terminal input encodes and decodes exactly one data field" {
+  let text : @protocol.TerminalInputPayload = {
+    id: "terminal-7",
+    data: Some("ls\n"),
+    data_base64: None,
+  }
+  @debug.assert_eq(text.to_json(), { "id": "terminal-7", "data": "ls\n" })
+  let decoded_text : @protocol.TerminalInputPayload = @json.from_json(
+    text.to_json(),
+  )
+  assert_eq(decoded_text, text)
+  let binary : @protocol.TerminalInputPayload = {
+    id: "terminal-8",
+    data: None,
+    data_base64: Some("AA=="),
+  }
+  @debug.assert_eq(binary.to_json(), {
+    "id": "terminal-8",
+    "data_base64": "AA==",
+  })
+  let decoded_binary : @protocol.TerminalInputPayload = @json.from_json(
+    binary.to_json(),
+  )
+  assert_eq(decoded_binary, binary)
+  for
+    invalid in (
+      [
+        { "id": "terminal-9" },
+        { "id": "terminal-9", "data": null, "data_base64": null },
+        { "id": "terminal-9", "data": "x", "data_base64": "eA==" },
+      ] : Array[Json]) {
+    let rejected = try {
+      let _ : @protocol.TerminalInputPayload = @json.from_json(invalid)
+    } catch {
+      _ => true
+    } noraise {
+      _ => false
+    }
+    assert_true(rejected)
+  }
+}
+
+///|
 test "file stats keep missing, present, and failed distinct on the wire" {
   let reply : @protocol.StatFilesReply = {
     stats: [
