@@ -206,8 +206,8 @@ pub fn tabs_bar(
   menu_open~ : Bool,
   expanded~ : Bool,
   toggle_menu~ : @cmd.Cmd,
-  close_all_files~ : @cmd.Cmd,
-  close_all_files_disabled~ : Bool,
+  close_all_tabs~ : @cmd.Cmd,
+  close_all_tabs_disabled~ : Bool,
   toggle_expanded~ : @cmd.Cmd,
   toggle_panel~ : @cmd.Cmd,
 ) -> @html.Html {
@@ -248,11 +248,11 @@ pub fn tabs_bar(
     @html.div(class="editor-tabs", tabs),
     @html.button(
       class="tab-action tab-close-all",
-      title="Close all file tabs",
+      title="Close all tabs",
       attrs=@html.Attrs::build()
-        .aria_label("Close all file tabs")
-        .disabled(close_all_files_disabled)
-        .on_click(_ => close_all_files),
+        .aria_label("Close all tabs")
+        .disabled(close_all_tabs_disabled)
+        .on_click(_ => close_all_tabs),
       icon(@icons.icon_close_all),
     ),
     @html.button(

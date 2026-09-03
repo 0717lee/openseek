@@ -2993,8 +2993,7 @@ pub fn update(
     // `EditorCommentAdded` pattern), opens/activates the dock tab, and calls
     // `open_document`. Reaching this arm means the root didn't intercept it;
     // changing nothing is the safe answer.
-    FileSelected(..) | SearchMatchSelected(..) | CloseAllFiles =>
-      (@cmd.none, state)
+    FileSelected(..) | SearchMatchSelected(..) => (@cmd.none, state)
     // Intercepted by the root so the dock can open/activate the file tab
     // before this package starts the paired working-tree + HEAD reads.
     ChangedFileSelected(_) => (@cmd.none, state)

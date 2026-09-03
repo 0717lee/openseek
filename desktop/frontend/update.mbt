@@ -1799,38 +1799,39 @@ fn Msg::opens_file_before_panel_reconciliation(self : Msg) -> Bool {
 }
 
 ///|
-fn close_all_file_tabs(
+fn close_all_tabs(
   dispatch : @cmd.Emit[Msg],
   model : Model,
 ) -> (@cmd.Cmd, Model) {
-  let paths = @dock.file_paths(model.dock)
-  guard !paths.is_empty() else { return (@cmd.none, model) }
-  let active = @dock.active_file(model.dock)
+  let tabs = model.dock.tabs.copy()
+  guard !tabs.is_empty() else { return (@cmd.none, model) }
+  let active = model.dock.active
   let commands : Array[@cmd.Cmd] = []
   let mut next = model
-  // Close background files first so the active file does not promote and load
-  // another file that this same action is about to close.
-  for path in paths {
-    if Some(path) != active {
-      let (command, updated) = update_msg(
-        dispatch,
-        Dock(TabClosed(@dock.DockTab::File(path~))),
-        next,
-      )
+  // Close background tabs first so the active tab does not promote and mount
+  // another tab that this same action is about to close. Routing every close
+  // through the ordinary transition preserves document and browser teardown.
+  for tab in tabs {
+    if Some(tab) != active {
+      let (command, updated) = update_msg(dispatch, Dock(TabClosed(tab)), next)
       commands.push(command)
       next = updated
     }
   }
-  if active is Some(path) {
-    let (command, updated) = update_msg(
-      dispatch,
-      Dock(TabClosed(@dock.DockTab::File(path~))),
-      next,
-    )
+  if active is Some(tab) {
+    let (command, updated) = update_msg(dispatch, Dock(TabClosed(tab)), next)
     commands.push(command)
     next = updated
   }
-  (@cmd.batch(commands), next)
+  (
+    @cmd.batch(commands),
+    {
+      ..next,
+      right_panel_open: true,
+      right_panel_menu_open: false,
+      right_panel_expanded: false,
+    },
+  )
 }
 
 ///|
@@ -2690,7 +2691,6 @@ fn update_msg(
       )
       (cmd, { ..model, file_panel: panel, })
     }
-    FileEditor(CloseAllFiles) => close_all_file_tabs(dispatch, model)
     // Historical rows open immutable commit/path identities rather than
     // joining the ordinary filesystem tab projection.
     FileEditor(HistoricalFileSelected(diff)) => {
@@ -4524,6 +4524,7 @@ fn update_msg(
     }
     CloseRightPanelMenu =>
       (@cmd.none, { ..model, right_panel_menu_open: false, })
+    CloseAllTabs => close_all_tabs(dispatch, model)
     OpenGoalEditor => {
       guard model.active_conversation() is Some(conv) else {
         return (@cmd.none, model)
@@ -18530,6 +18531,31 @@ test "launcher rows open Browser and all Explorer destinations" {
   let (_, model) = update(dispatch, ExplorerRequested(ExplorerSearch), model)
   assert_true(model.file_panel.explorer_mode is ExplorerSearch)
   assert_true(model.file_panel.tree_open)
+}
+
+///|
+test "CloseAllTabs tears down mixed tabs and keeps the empty launcher open" {
+  let dispatch = test_dispatch()
+  let (_, browser) = update(dispatch, BrowserTabRequested, {
+    ..desktop_model(),
+    right_panel_open: true,
+  })
+  let (_, mixed) = update(dispatch, ExplorerRequested(ExplorerFiles), browser)
+  let mixed = {
+    ..mixed,
+    right_panel_menu_open: true,
+    right_panel_expanded: true,
+  }
+  assert_true(
+    mixed.dock.tabs == [@dock.DockTab::Browser(id=1), @dock.DockTab::FilePicker],
+  )
+  let (_, closed) = update(dispatch, CloseAllTabs, mixed)
+  assert_true(closed.dock.tabs.is_empty())
+  assert_true(closed.dock.active is None)
+  assert_true(@preview.page(closed.preview, 1) is None)
+  assert_true(closed.right_panel_open)
+  assert_false(closed.right_panel_menu_open)
+  assert_false(closed.right_panel_expanded)
 }
 
 ///|

@@ -460,7 +460,7 @@ test('quick open moves its keyboard selection and opens the chosen file', async 
   expect(app.pageErrors).toEqual([]);
 });
 
-test('file explorer closes all open file tabs', async ({ page }) => {
+test('tab strip closes every tab type into the New Tab launcher', async ({ page }) => {
   const app = new DesktopBrowserHarness(page);
   await app.install();
   await app.goto();
@@ -476,10 +476,14 @@ test('file explorer closes all open file tabs', async ({ page }) => {
   await expect(fileTabs).toHaveCount(2);
   await fileTabs.filter({ hasText: 'main.mbt' }).click();
   await expect(fileTabs.filter({ hasText: 'main.mbt' })).toHaveClass(/active/);
-  const closeAll = page.getByRole('button', { name: 'Close all file tabs' });
+  await app.openReview();
+  await expect(fileTabs).toHaveCount(3);
+  const closeAll = page.getByRole('button', { name: 'Close all tabs' });
   await expect(closeAll).toBeEnabled();
   await closeAll.click();
   await expect(fileTabs).toHaveCount(0);
+  await expect(page.locator('.dock-launcher')).toBeVisible();
+  await expect(closeAll).toBeDisabled();
   expect(app.pageErrors).toEqual([]);
 });
 
