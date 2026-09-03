@@ -567,35 +567,33 @@ fn tree_pane(dispatch : @cmd.Emit[Msg], state : State, ctx : Ctx) -> @html.Html 
         .class("tree-resize-handle"),
       ([] : Array[@html.Html]),
     ),
-    @html.div(class="explorer-toolbar", [
-      @html.div(
-        class="explorer-tabs",
-        attrs=@html.Attrs::build().role("tablist").aria_label("Explorer views"),
-        [
-          explorer_tab(
-            dispatch,
-            state.explorer_mode,
-            ExplorerFiles,
-            "Workspace files",
-            [@html.span("Files")],
-          ),
-          explorer_tab(
-            dispatch,
-            state.explorer_mode,
-            ExplorerChanges,
-            "Changed files (click again to refresh)",
-            [@html.span("Changes"), change_count(state.changes)],
-          ),
-          explorer_tab(
-            dispatch,
-            state.explorer_mode,
-            ExplorerSearch,
-            "Search across the workspace",
-            [@html.span("Search")],
-          ),
-        ],
-      ),
-    ]),
+    @html.div(
+      class="explorer-tabs",
+      attrs=@html.Attrs::build().role("tablist").aria_label("Explorer views"),
+      [
+        explorer_tab(
+          dispatch,
+          state.explorer_mode,
+          ExplorerFiles,
+          "Workspace files",
+          [@html.span("Files")],
+        ),
+        explorer_tab(
+          dispatch,
+          state.explorer_mode,
+          ExplorerChanges,
+          "Changed files (click again to refresh)",
+          [@html.span("Changes"), change_count(state.changes)],
+        ),
+        explorer_tab(
+          dispatch,
+          state.explorer_mode,
+          ExplorerSearch,
+          "Search across the workspace",
+          [@html.span("Search")],
+        ),
+      ],
+    ),
     @html.div(
       class=if state.explorer_mode is ExplorerSearch {
         "file-tree search-inventory"
