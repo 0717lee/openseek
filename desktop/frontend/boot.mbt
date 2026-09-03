@@ -526,6 +526,7 @@ pub fn boot() -> Unit {
       toggle_panel: emit(ToggleRightPanel),
       toggle_menu: emit(ToggleRightPanelMenu),
       toggle_expanded: emit(ToggleRightPanelExpanded),
+      close_all_tabs: emit(CloseAllTabs),
       close_menu: emit(CloseRightPanelMenu),
     })
     let terminal_input = state.map(model => model.terminal_input())

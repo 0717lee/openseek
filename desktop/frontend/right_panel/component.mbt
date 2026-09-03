@@ -43,6 +43,7 @@ pub(all) struct Actions {
   toggle_panel : @cmd.Cmd
   toggle_menu : @cmd.Cmd
   toggle_expanded : @cmd.Cmd
+  close_all_tabs : @cmd.Cmd
   close_menu : @cmd.Cmd
 }
 

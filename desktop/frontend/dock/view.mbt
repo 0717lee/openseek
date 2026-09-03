@@ -206,6 +206,8 @@ pub fn tabs_bar(
   menu_open~ : Bool,
   expanded~ : Bool,
   toggle_menu~ : @cmd.Cmd,
+  close_all_tabs~ : @cmd.Cmd,
+  close_all_tabs_disabled~ : Bool,
   toggle_expanded~ : @cmd.Cmd,
   toggle_panel~ : @cmd.Cmd,
 ) -> @html.Html {
@@ -245,7 +247,20 @@ pub fn tabs_bar(
   let children : Array[@html.Html] = [
     @html.div(class="editor-tabs", tabs),
     @html.button(
-      class=if chips.is_empty() { "tab-add hidden" } else { "tab-add" },
+      class="tab-action tab-close-all",
+      title="Close all tabs",
+      attrs=@html.Attrs::build()
+        .aria_label("Close all tabs")
+        .disabled(close_all_tabs_disabled)
+        .on_click(_ => close_all_tabs),
+      icon(@icons.icon_close_all),
+    ),
+    @html.button(
+      class=if chips.is_empty() {
+        "tab-action tab-add hidden"
+      } else {
+        "tab-action tab-add"
+      },
       title="New tab",
       on_click=toggle_menu,
       icon(icon_add),

@@ -348,7 +348,7 @@ html.is-resizing * {
 .editor-tabsbar {
   position: relative;
 }
-.tab-add {
+.tab-action {
   flex: 0 0 auto;
   display: grid;
   place-items: center;
@@ -361,9 +361,13 @@ html.is-resizing * {
   color: var(--color-text-secondary);
   cursor: pointer;
 }
-.tab-add:hover {
+.tab-action:hover:not(:disabled) {
   background: var(--color-accent-soft);
   color: var(--color-accent-strong);
+}
+.tab-action:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .tab-add.hidden {
   display: none;
