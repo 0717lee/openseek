@@ -460,6 +460,29 @@ test('quick open moves its keyboard selection and opens the chosen file', async 
   expect(app.pageErrors).toEqual([]);
 });
 
+test('file explorer closes all open file tabs', async ({ page }) => {
+  const app = new DesktopBrowserHarness(page);
+  await app.install();
+  await app.goto();
+  await app.openSession();
+
+  await app.openQuickOpen();
+  await page.getByRole('option', { name: /main\.mbt/ }).click();
+  await app.openQuickOpen();
+  await page.locator('#quick-open-input').fill('README');
+  await page.getByRole('option', { name: /README\.md/ }).click();
+
+  const fileTabs = page.locator('.editor-tab');
+  await expect(fileTabs).toHaveCount(2);
+  await fileTabs.filter({ hasText: 'main.mbt' }).click();
+  await expect(fileTabs.filter({ hasText: 'main.mbt' })).toHaveClass(/active/);
+  const closeAll = page.getByRole('button', { name: 'Close all file tabs' });
+  await expect(closeAll).toBeEnabled();
+  await closeAll.click();
+  await expect(fileTabs).toHaveCount(0);
+  expect(app.pageErrors).toEqual([]);
+});
+
 test('file breadcrumbs browse cached directories with keyboard navigation', async ({ page }) => {
   const app = new DesktopBrowserHarness(page);
   app.directoryEntries['/workspace/src'] = [

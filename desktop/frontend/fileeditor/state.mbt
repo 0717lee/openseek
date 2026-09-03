@@ -838,6 +838,9 @@ pub(all) enum Msg {
   // A file row was clicked: read it and show it in the viewer. `name` is the
   // entry's display name, kept for the viewer's title and language guess.
   FileSelected(path~ : @pathx.Relative, name~ : String)
+  // Close every ordinary file tab. The root handles this strip-level intent
+  // through the same transition used by each tab's close button.
+  CloseAllFiles
   // A Changes row was clicked. The full decoded row carries the original path
   // needed by renames/copies and whether a working-tree read is possible.
   ChangedFileSelected(ChangedFile)

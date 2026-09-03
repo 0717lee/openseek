@@ -1799,6 +1799,41 @@ fn Msg::opens_file_before_panel_reconciliation(self : Msg) -> Bool {
 }
 
 ///|
+fn close_all_file_tabs(
+  dispatch : @cmd.Emit[Msg],
+  model : Model,
+) -> (@cmd.Cmd, Model) {
+  let paths = @dock.file_paths(model.dock)
+  guard !paths.is_empty() else { return (@cmd.none, model) }
+  let active = @dock.active_file(model.dock)
+  let commands : Array[@cmd.Cmd] = []
+  let mut next = model
+  // Close background files first so the active file does not promote and load
+  // another file that this same action is about to close.
+  for path in paths {
+    if Some(path) != active {
+      let (command, updated) = update_msg(
+        dispatch,
+        Dock(TabClosed(@dock.DockTab::File(path~))),
+        next,
+      )
+      commands.push(command)
+      next = updated
+    }
+  }
+  if active is Some(path) {
+    let (command, updated) = update_msg(
+      dispatch,
+      Dock(TabClosed(@dock.DockTab::File(path~))),
+      next,
+    )
+    commands.push(command)
+    next = updated
+  }
+  (@cmd.batch(commands), next)
+}
+
+///|
 fn update_msg(
   dispatch : @cmd.Emit[Msg],
   msg : Msg,
@@ -2655,6 +2690,7 @@ fn update_msg(
       )
       (cmd, { ..model, file_panel: panel, })
     }
+    FileEditor(CloseAllFiles) => close_all_file_tabs(dispatch, model)
     // Historical rows open immutable commit/path identities rather than
     // joining the ordinary filesystem tab projection.
     FileEditor(HistoricalFileSelected(diff)) => {
