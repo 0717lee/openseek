@@ -28,6 +28,11 @@ type OpenPathPayload = @protocol.OpenPathPayload
 type OpenPathReply = @protocol.OpenPathReply
 
 ///|
+/// Reply to `host.reveal_path`: the file manager accepted the target, or the
+/// host refused it with a user-facing reason.
+type RevealPathReply = @protocol.RevealPathReply
+
+///|
 /// Reply to `apply_update`: the swap succeeded and the window may close.
 type ApplyUpdateReply = @protocol.ApplyUpdateReply
 

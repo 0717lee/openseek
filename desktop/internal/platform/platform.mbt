@@ -18,6 +18,13 @@ pub fn is_darwin() -> Bool {
 extern "C" fn windows_open(target : String) -> Int = "moonbit_openseek_desktop_platform_open"
 
 ///|
+/// Ask Explorer to show and select one path without routing it through a
+/// command interpreter. The non-Windows stub fails closed; the public wrapper
+/// selects it only on Windows.
+#borrow(target)
+extern "C" fn windows_reveal(target : String) -> Int = "moonbit_openseek_desktop_platform_reveal"
+
+///|
 /// Hand `path` to the platform's default opener, returning its exit code. The
 /// opener returns as soon as it has handed the file off (LaunchServices on
 /// macOS, the desktop portal on Linux), so the code reports the hand-off, not
@@ -51,6 +58,20 @@ pub async fn open_url(url : String) -> Int {
     @process.run("open", [url])
   } else {
     @process.run("xdg-open", [url])
+  }
+}
+
+///|
+/// Show `path` in the host's file manager. macOS and Windows select the exact
+/// target; Linux has no universal selection protocol, so its portable fallback
+/// opens the containing directory. The code reports the hand-off only.
+pub async fn reveal_path(path : String) -> Int {
+  if @sys.win32 || @sys.win64 {
+    windows_reveal(path)
+  } else if is_darwin() {
+    @process.run("open", ["-R", path])
+  } else {
+    @process.run("xdg-open", [@path.Path(path).dirname().to_string()])
   }
 }
 

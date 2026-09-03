@@ -4372,6 +4372,25 @@ fn update_msg(
         model,
       )
     }
+    RevealFile(path) => {
+      guard model.is_desktop &&
+        model.active_checkout() is Some(active) &&
+        active.owner.channel is Local &&
+        active.placement is Some(placement) &&
+        placement.checkout_root() is Some(cwd) else {
+        return (@cmd.none, model)
+      }
+      (
+        reveal_file(
+          dispatch,
+          active.owner.channel,
+          active.owner.session,
+          cwd,
+          path,
+        ),
+        model,
+      )
+    }
     OpenFileAt(owner~, generation~, path~, line~, column~) => {
       guard model.active_checkout() is Some(active) &&
         owner == active.owner &&
@@ -5008,8 +5027,9 @@ fn update_msg(
       // built-in Browser instead of changing behavior with the conversation
       // provider. Settings' device-page link is the clearest external case:
       // it wants the browser where the user is already signed in.
-      if model.is_desktop &&
-        (model.screen is Chat || model.screen is Codex) &&
+      if !model.is_desktop {
+        (open_browser_link(url), model)
+      } else if (model.screen is Chat || model.screen is Codex) &&
         @preview.is_web_url(url) {
         // Opening or reusing a Browser tab is a newer dock navigation than a
         // transcript text-file link still waiting on `host.open_path`. Spend the

@@ -51,6 +51,9 @@ priv enum Msg {
 const OpenEvent : String = "openseek-action-menu-open"
 
 ///|
+const TemporaryFocusAttribute : String = "data-action-menu-temporary-focus"
+
+///|
 fn menu_id(target : String) -> String {
   target + ":actions"
 }
@@ -192,6 +195,10 @@ fn focus_element(id : String, after_render : Bool) -> @cmd.Cmd {
         "focus",
         ([] : Array[@js.Value]),
       )
+      if element.get_attribute(TemporaryFocusAttribute) == Some(id) {
+        element.remove_attribute(TemporaryFocusAttribute)
+        element.remove_attribute("id")
+      }
     }
   }
   if after_render {
@@ -535,6 +542,7 @@ priv suberror DismissSubscription {
 fn dismiss_subscription(
   target_key : String,
   emit : @cmd.Emit[Unit],
+  dismiss_on_context? : Bool = true,
 ) -> @sub.Sub {
   @sub.custom_sub(
     "action-menu-dismiss",
@@ -570,7 +578,9 @@ fn dismiss_subscription(
         click_listener,
         capture=true,
       )
-      document.add_event_listener("contextmenu", context_listener)
+      if dismiss_on_context {
+        document.add_event_listener("contextmenu", context_listener)
+      }
       let blur_listener : @dom.Listener = _ => scheduler.add(emit(()))
       let resize_listener : @dom.Listener = _ => scheduler.add(emit(()))
       window.add_event_listener("blur", blur_listener)
@@ -596,7 +606,9 @@ fn dismiss_subscription(
             click_listener,
             capture=true,
           )
-          document.remove_event_listener("contextmenu", context_listener)
+          if dismiss_on_context {
+            document.remove_event_listener("contextmenu", context_listener)
+          }
           window.remove_event_listener("blur", blur_listener)
           window.remove_event_listener("resize", resize_listener)
           if viewport_target is Some(target) {

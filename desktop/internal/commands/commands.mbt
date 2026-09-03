@@ -623,6 +623,12 @@ pub let host_open_path : Command[
 ] = Command("host.open_path")
 
 ///|
+pub let host_reveal_path : Command[
+  @protocol.OpenPathPayload,
+  @protocol.RevealPathReply,
+] = Command("host.reveal_path")
+
+///|
 pub let host_connect : Command[@protocol.EmptyPayload, @protocol.EmptyReply] = Command(
   "host.connect",
 )

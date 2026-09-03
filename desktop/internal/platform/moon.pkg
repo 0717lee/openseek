@@ -2,6 +2,7 @@ import {
   "openseek_desktop/internal/processx",
   "moonbitlang/async",
   "moonbitlang/async/process",
+  "moonbitlang/x/path",
   "tonyfettes/platform" @sys,
 }
 

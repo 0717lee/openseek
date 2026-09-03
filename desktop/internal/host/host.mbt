@@ -343,6 +343,9 @@ pub fn endpoints(
     @endpoint.Endpoint::remote(@commands.host_open_path, async fn(payload) {
       open_path_op(payload)
     }),
+    @endpoint.Endpoint::remote(@commands.host_reveal_path, async fn(payload) {
+      reveal_path_op(payload)
+    }),
   ]
 }
 

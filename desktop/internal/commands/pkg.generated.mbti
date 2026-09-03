@@ -157,6 +157,8 @@ pub let host_connect : Command[@protocol.EmptyPayload, @protocol.EmptyReply]
 
 pub let host_open_path : Command[@protocol.OpenPathPayload, @protocol.OpenPathReply]
 
+pub let host_reveal_path : Command[@protocol.OpenPathPayload, @protocol.RevealPathReply]
+
 pub let lsp_hover : Command[@protocol.LspHoverPayload, @protocol.LspHoverReply]
 
 pub let lsp_open : Command[@protocol.LspOpenPayload, @protocol.LspDiagnosticsReply]
