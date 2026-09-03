@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 import {
   expectMoonBitReportPassed,
   installMoonBitReporter,
@@ -165,7 +165,7 @@ async function expectHoverCallCancelled(page, callId) {
 test('uses the workbench type scale and Markdown layout contract', async ({
   page,
 }) => {
-  await page.goto('/browser-tests/component.html?markdownDocument=1');
+  await gotoBrowserScenario(page, 'markdown-document');
   await page.waitForFunction(() =>
     Boolean(globalThis.__markdownDocumentControls),
   );
@@ -280,7 +280,7 @@ test('mounts zoom and drag controls for D2, UML, and Mermaid in Markdown documen
   );
   const reporter = await installMoonBitReporter(page);
   try {
-    await page.goto('/browser-tests/component.html?markdownDocument=1');
+    await gotoBrowserScenario(page, 'markdown-document');
     await page.waitForFunction(() =>
       Boolean(globalThis.__markdownDocumentControls),
     );
@@ -452,7 +452,7 @@ test('renders and refreshes the editor-owned readonly Markdown presentation', as
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   const reporter = await installMoonBitReporter(page);
   try {
-    await page.goto('/browser-tests/component.html?markdownDocument=1');
+    await gotoBrowserScenario(page, 'markdown-document');
     await page.waitForFunction(() =>
       Boolean(globalThis.__markdownDocumentControls),
     );

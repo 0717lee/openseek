@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 import {
   expectMoonBitReportPassed,
   installMoonBitReporter,
@@ -128,7 +128,7 @@ async function mountMarkdownComments(
     };
   });
   const reporter = await installMoonBitReporter(page);
-  await page.goto('/browser-tests/component.html?markdownComments=1');
+  await gotoBrowserScenario(page, 'markdown-comments');
   await page.waitForFunction(() => Boolean(globalThis.__markdownCommentsControls));
   const report = await reporter.waitForReport(testInfo, {
     suite: 'markdown_comments',

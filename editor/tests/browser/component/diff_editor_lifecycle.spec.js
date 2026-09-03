@@ -1,10 +1,10 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 
 const diffLifecycleRoot =
   '.diff-lifecycle-host > .moonbit-diff-editor';
 
 async function openDiffLifecycle(page) {
-  await page.goto('/browser-tests/component.html?diffLifecycle=1');
+  await gotoBrowserScenario(page, 'diff-editor-lifecycle');
   await page.waitForFunction(() =>
     Boolean(globalThis.__diffEditorLifecycleControls),
   );

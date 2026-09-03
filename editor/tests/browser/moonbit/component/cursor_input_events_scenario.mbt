@@ -71,7 +71,7 @@ fn cursor_input_state_json(
 }
 
 ///|
-fn run_cursor_input_events_test() -> Unit {
+pub fn run_cursor_input_events_test() -> Unit {
   let document = @rdom.document()
   guard document.query_selector("#app").to_option() is Some(app) else { return }
   let shell = document.create_element("main")

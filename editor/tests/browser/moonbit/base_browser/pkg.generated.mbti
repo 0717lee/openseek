@@ -1,8 +1,8 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "moonbitlang/editor/tests/browser/moonbit/folding_nested"
+package "moonbitlang/editor/tests/browser/moonbit/base_browser"
 
 // Values
-pub fn run_folding_nested_test() -> Unit
+pub fn run_base_browser_test() -> Unit
 
 // Errors
 

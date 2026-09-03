@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 import {
   expectMoonBitReportPassed,
   installMoonBitReporter,
@@ -19,7 +19,7 @@ async function settle(page) {
 
 async function mountViewZones(page, testInfo) {
   const reporter = await installMoonBitReporter(page);
-  await page.goto('/browser-tests/component.html?viewZones=1');
+  await gotoBrowserScenario(page, 'view-zones');
   await page.waitForFunction(() => Boolean(globalThis.__viewZonesControls));
   const report = await reporter.waitForReport(testInfo, {
     suite: 'view_zones',

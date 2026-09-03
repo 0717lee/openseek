@@ -5,7 +5,7 @@
 // visible-range publication behind the later `handleInitialized` call.
 
 ///|
-fn run_initial_size_test() -> Unit {
+pub fn run_initial_size_test() -> Unit {
   let ctx = @support.BrowserTestContext("initial_size")
   let document = @rdom.document()
   guard document.query_selector("#app").to_option() is Some(app) else {

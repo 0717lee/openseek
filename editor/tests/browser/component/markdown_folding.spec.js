@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 import {
   expectMoonBitReportPassed,
   installMoonBitReporter,
@@ -14,7 +14,7 @@ const toggle = `${article} .moonbit-viewer-markdown-fold-toggle`;
 
 async function openFoldingScenario(page, testInfo) {
   const reporter = await installMoonBitReporter(page);
-  await page.goto('/browser-tests/component.html?markdownFolding=1');
+  await gotoBrowserScenario(page, 'markdown-folding');
   await page.waitForFunction(() =>
     Boolean(globalThis.__markdownFoldingControls),
   );

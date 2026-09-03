@@ -15,7 +15,7 @@ fn whitespace_selection_source_text() -> String {
 }
 
 ///|
-fn run_whitespace_selection_test() -> Unit {
+pub fn run_whitespace_selection_test() -> Unit {
   let ctx = @support.BrowserTestContext("whitespace_selection")
   let done = Ref(false)
   let uri = try! @base_common.Uri::from(

@@ -6,7 +6,7 @@
 
 ///|
 #external
-type BrowserDefinitionGate
+priv type BrowserDefinitionGate
 
 ///|
 extern "js" fn BrowserDefinitionGate::new() -> BrowserDefinitionGate =
@@ -227,7 +227,7 @@ fn definition_state_json(
 }
 
 ///|
-fn run_definition_browser_test() -> Unit {
+pub fn run_definition_browser_test() -> Unit {
   let ctx = @support.BrowserTestContext("definition")
   let document = @rdom.document()
   guard document.query_selector("#app").to_option() is Some(app) else {

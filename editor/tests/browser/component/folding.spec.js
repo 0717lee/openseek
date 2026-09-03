@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 import {
   expectMoonBitReportPassed,
   installMoonBitReporter,
@@ -19,7 +19,7 @@ const editor = '.monaco-editor.readonly-editor';
 test('folding: chevron click folds and unfolds, keyboard folds at cursor', async ({ page }, testInfo) => {
   const reporter = await installMoonBitReporter(page);
   try {
-    await page.goto('/browser-tests/folding.html');
+    await gotoBrowserScenario(page, 'folding');
     await expect(page.locator(editor)).toContainText('fold_child_a', {
       timeout: 10_000,
     });

@@ -19,7 +19,7 @@ Focused build and development commands are:
 ```sh
 just build                       # production assets + default Wasm server
 just dist-front-end              # production browser assets only
-just build-browser-tests         # browser-correctness scenario bundles
+just build-browser-tests         # single browser-correctness scenario runner
 just                             # build and serve with repository defaults
 just test-browser-component      # direct Viewer subset of browser correctness
 just ROOT=. PORT=5173 dev        # build, serve, and print Local/Network URLs
@@ -108,17 +108,19 @@ ordering, and semantic no-op behavior belong to Headless MoonBit tests.
 Attachment, node ownership, render scheduling, and browser-widget lifecycle
 belong to Playwright.
 
-Compilation is `moon build`'s job: every js entry point declares
-`supported_targets = "js"`, so one workspace build emits all of them.
+Compilation is `moon build`'s job. Browser scenarios are JS-only library
+packages statically imported by `tests/browser/moonbit/runner`, the only
+browser-test executable, so shared editor dependencies are linked once.
 `scripts/build-web.mbtx` assembles the production reference app and embed page,
 then owner-adjacent CSS and codicons, under `web/dist`;
 `scripts/stage_mermaid` adds the pinned, SHA-256-verified local Mermaid ESM
 tree. `scripts/build-browser-tests.mbtx` stages the MoonBit scenarios used by
-browser correctness under `web/dist/browser-tests`. Before staging, the
-browser-test assembler requires every selected bundle and source
-map to exist in exactly one of the module-qualified or unqualified layouts; it
-rejects ambiguous layouts rather than risking a stale artifact from a different
-`moon.work` context.
+browser correctness as one `runner.html`/`runner.mjs` pair under
+`web/dist/browser-tests`. Before staging, the assembler requires the runner and
+source map to exist in exactly one of the module-qualified or unqualified
+layouts; it rejects ambiguous layouts rather than risking a stale artifact from
+a different `moon.work` context. Staging replaces that generated directory, so
+obsolete per-scenario pages cannot remain reachable.
 
 ### Browser scenario ownership
 
@@ -137,11 +139,13 @@ A browser-visible contract normally has two adjacent owners:
   sidebar, remote protocol, file watching, or host tool adapter is part of the
   behavior.
 
-When adding a scenario package, declare its JS target and add its bundle to
-`scripts/build-browser-tests.mbtx`. Keep exact routes,
-query flags, selectors, globals, and focused-run instructions in
-`tests/browser/README.md` or the owning package README. Keep feature behavior in
-the owning package docs and focused tests; do not grow a feature-by-feature
+When adding a scenario package, declare its JS target, export one focused entry
+function, then import and dispatch it from `tests/browser/moonbit/runner` under
+a stable scenario id. Playwright opens that id through
+`gotoBrowserScenario`; its default fixture creates a fresh context and page for
+every case. Keep scenario ids, selectors, globals, and focused-run instructions
+in `tests/browser/README.md` or the owning package README. Keep feature behavior
+in the owning package docs and focused tests; do not grow a feature-by-feature
 catalog in this cross-cutting harness guide.
 
 ## Browser Rules

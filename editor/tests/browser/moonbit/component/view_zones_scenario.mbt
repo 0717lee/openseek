@@ -3,11 +3,6 @@
 // owning MoonBit white-box packages.
 
 ///|
-suberror ViewZonesFixtureError {
-  ViewZonesFixtureError(String)
-}
-
-///|
 fn view_zones_source_with_line_count(line_count : Int) -> String {
   let text = StringBuilder()
   for line in 1..<=line_count {
@@ -25,11 +20,7 @@ fn view_zones_source() -> String {
 }
 
 ///|
-fn run_view_zones_test() -> Unit {
-  // Keep the existing executable-package interface stable; callback-error
-  // matrices moved to white-box tests, but this pre-existing error is public
-  // in the generated test bundle interface.
-  let _preserved_error_interface = ViewZonesFixtureError("fixture")
+pub fn run_view_zones_test() -> Unit {
   let ctx = @support.BrowserTestContext("view_zones")
   let document = @rdom.document()
   guard document.query_selector("#app").to_option() is Some(app) else {

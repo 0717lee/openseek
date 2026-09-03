@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 import {
   expectMoonBitReportPassed,
   installMoonBitReporter,
@@ -50,7 +50,7 @@ async function settle(page) {
 
 async function mountDefinitionFixture(page, testInfo) {
   const reporter = await installMoonBitReporter(page);
-  await page.goto('/browser-tests/definition.html');
+  await gotoBrowserScenario(page, 'definition-navigation');
   await page.waitForFunction(() => Boolean(globalThis.__definitionControls));
   const report = await reporter.waitForReport(testInfo, {
     suite: 'definition',

@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 import {
   expectMoonBitReportPassed,
   installMoonBitReporter,
@@ -87,7 +87,7 @@ async function runRecursiveMatrix(page, clickOptions) {
 test('folding: shift-clicking a chevron folds children first, then the region, and unfolds the subtree', async ({ page }, testInfo) => {
   const reporter = await installMoonBitReporter(page);
   try {
-    await page.goto('/browser-tests/folding_nested.html');
+    await gotoBrowserScenario(page, 'folding-nested');
     await expect(page.locator(editor)).toContainText('nest_leaf_a', {
       timeout: 10_000,
     });

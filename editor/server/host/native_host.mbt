@@ -622,104 +622,12 @@ fn static_route(path : String) -> (String, String)? {
     "/codicon.ttf" => Some(("codicon.ttf", "font/ttf"))
     "/editor.mjs" => Some(("editor.mjs", "text/javascript; charset=utf-8"))
     "/embed.mjs" => Some(("embed.mjs", "text/javascript; charset=utf-8"))
-    "/browser-tests/component.html" =>
-      Some(("browser-tests/component.html", "text/html; charset=utf-8"))
-    "/browser-tests/component.mjs" =>
-      Some(("browser-tests/component.mjs", "text/javascript; charset=utf-8"))
-    "/browser-tests/component.mjs.map" =>
-      Some(
-        ("browser-tests/component.mjs.map", "application/json; charset=utf-8"),
-      )
-    "/browser-tests/read_api.html" =>
-      Some(("browser-tests/read_api.html", "text/html; charset=utf-8"))
-    "/browser-tests/read_api.mjs" =>
-      Some(("browser-tests/read_api.mjs", "text/javascript; charset=utf-8"))
-    "/browser-tests/read_api.mjs.map" =>
-      Some(
-        ("browser-tests/read_api.mjs.map", "application/json; charset=utf-8"),
-      )
-    "/browser-tests/whitespace_selection.html" =>
-      Some(
-        ("browser-tests/whitespace_selection.html", "text/html; charset=utf-8"),
-      )
-    "/browser-tests/whitespace_selection.mjs" =>
-      Some(
-        (
-          "browser-tests/whitespace_selection.mjs", "text/javascript; charset=utf-8",
-        ),
-      )
-    "/browser-tests/whitespace_selection.mjs.map" =>
-      Some(
-        (
-          "browser-tests/whitespace_selection.mjs.map", "application/json; charset=utf-8",
-        ),
-      )
-    "/browser-tests/agent_feedback.html" =>
-      Some(("browser-tests/agent_feedback.html", "text/html; charset=utf-8"))
-    "/browser-tests/agent_feedback.mjs" =>
-      Some(
-        ("browser-tests/agent_feedback.mjs", "text/javascript; charset=utf-8"),
-      )
-    "/browser-tests/model_swap.html" =>
-      Some(("browser-tests/model_swap.html", "text/html; charset=utf-8"))
-    "/browser-tests/model_swap.mjs" =>
-      Some(("browser-tests/model_swap.mjs", "text/javascript; charset=utf-8"))
-    "/browser-tests/model_swap.mjs.map" =>
-      Some(
-        ("browser-tests/model_swap.mjs.map", "application/json; charset=utf-8"),
-      )
-    "/browser-tests/folding.html" =>
-      Some(("browser-tests/folding.html", "text/html; charset=utf-8"))
-    "/browser-tests/folding.mjs" =>
-      Some(("browser-tests/folding.mjs", "text/javascript; charset=utf-8"))
-    "/browser-tests/folding.mjs.map" =>
-      Some(("browser-tests/folding.mjs.map", "application/json; charset=utf-8"))
-    "/browser-tests/folding_nested.html" =>
-      Some(("browser-tests/folding_nested.html", "text/html; charset=utf-8"))
-    "/browser-tests/folding_nested.mjs" =>
-      Some(
-        ("browser-tests/folding_nested.mjs", "text/javascript; charset=utf-8"),
-      )
-    "/browser-tests/quick_diff.html" =>
-      Some(("browser-tests/quick_diff.html", "text/html; charset=utf-8"))
-    "/browser-tests/quick_diff.mjs" =>
-      Some(("browser-tests/quick_diff.mjs", "text/javascript; charset=utf-8"))
-    "/browser-tests/quick_diff.mjs.map" =>
-      Some(
-        ("browser-tests/quick_diff.mjs.map", "application/json; charset=utf-8"),
-      )
-    "/browser-tests/definition.html" =>
-      Some(("browser-tests/definition.html", "text/html; charset=utf-8"))
-    "/browser-tests/definition.mjs" =>
-      Some(("browser-tests/definition.mjs", "text/javascript; charset=utf-8"))
-    "/browser-tests/definition.mjs.map" =>
-      Some(
-        ("browser-tests/definition.mjs.map", "application/json; charset=utf-8"),
-      )
-    "/browser-tests/peek_references.html" =>
-      Some(("browser-tests/peek_references.html", "text/html; charset=utf-8"))
-    "/browser-tests/peek_references.mjs" =>
-      Some(
-        ("browser-tests/peek_references.mjs", "text/javascript; charset=utf-8"),
-      )
-    "/browser-tests/peek_references.mjs.map" =>
-      Some(
-        (
-          "browser-tests/peek_references.mjs.map", "application/json; charset=utf-8",
-        ),
-      )
-    "/browser-tests/folding_nested.mjs.map" =>
-      Some(
-        (
-          "browser-tests/folding_nested.mjs.map", "application/json; charset=utf-8",
-        ),
-      )
-    "/browser-tests/agent_feedback.mjs.map" =>
-      Some(
-        (
-          "browser-tests/agent_feedback.mjs.map", "application/json; charset=utf-8",
-        ),
-      )
+    "/browser-tests/runner.html" =>
+      Some(("browser-tests/runner.html", "text/html; charset=utf-8"))
+    "/browser-tests/runner.mjs" =>
+      Some(("browser-tests/runner.mjs", "text/javascript; charset=utf-8"))
+    "/browser-tests/runner.mjs.map" =>
+      Some(("browser-tests/runner.mjs.map", "application/json; charset=utf-8"))
     _ => mermaid_static_route(path)
   }
 }

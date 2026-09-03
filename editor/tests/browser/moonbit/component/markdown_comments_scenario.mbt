@@ -117,7 +117,7 @@ fn markdown_comments_state_json(viewer : @viewer.Viewer) -> String {
 }
 
 ///|
-fn run_markdown_comments_test() -> Unit {
+pub fn run_markdown_comments_test() -> Unit {
   let ctx = @support.BrowserTestContext("markdown_comments")
   let document = @rdom.document()
   guard document.query_selector("#app").to_option() is Some(app) else {

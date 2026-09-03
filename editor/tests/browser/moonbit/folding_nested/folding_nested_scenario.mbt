@@ -29,7 +29,7 @@ fn folding_nested_fixture_model() -> @model.TextModel {
 }
 
 ///|
-fn run_folding_nested_test() -> Unit {
+pub fn run_folding_nested_test() -> Unit {
   let ctx = @support.BrowserTestContext("folding_nested")
   let document = @rdom.document()
   guard document.query_selector("#app").to_option() is Some(app) else {

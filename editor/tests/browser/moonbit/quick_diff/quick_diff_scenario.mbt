@@ -26,7 +26,7 @@ fn quick_diff_fixture_model() -> @model.TextModel {
 }
 
 ///|
-fn run_quick_diff_test() -> Unit {
+pub fn run_quick_diff_test() -> Unit {
   let ctx = @support.BrowserTestContext("quick_diff")
   let document = @rdom.document()
   guard document.query_selector("#app").to_option() is Some(app) else {

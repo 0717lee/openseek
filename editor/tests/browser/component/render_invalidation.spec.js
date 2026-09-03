@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 
 const editorSelector =
   '.render-invalidation-host > .monaco-editor.readonly-editor';
@@ -17,7 +17,7 @@ async function settle(page) {
 }
 
 async function mountFixture(page) {
-  await page.goto('/browser-tests/component.html?renderInvalidation=1');
+  await gotoBrowserScenario(page, 'render-invalidation');
   await page.waitForFunction(() => Boolean(globalThis.__renderInvalidationControls));
   await expect(page.locator(editorSelector)).toContainText('prefix anchor target');
   await expect(

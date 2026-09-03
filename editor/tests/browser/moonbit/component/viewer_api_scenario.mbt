@@ -57,7 +57,7 @@ fn set_component_diagnostics(
 }
 
 ///|
-fn run_viewer_api_test() -> Unit {
+pub fn run_viewer_api_test() -> Unit {
   let ctx = @support.BrowserTestContext("viewer_api")
   assert_container_contract(ctx)
   let rendered_count = Ref(0)

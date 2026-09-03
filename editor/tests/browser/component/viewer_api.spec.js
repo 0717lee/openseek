@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 import {
   expectMoonBitReportPassed,
   installMoonBitReporter,
@@ -7,7 +7,7 @@ import {
 test('runs MoonBit viewer API component checks in the browser', async ({ page }, testInfo) => {
   const reporter = await installMoonBitReporter(page);
   try {
-    await page.goto('/browser-tests/component.html');
+    await gotoBrowserScenario(page, 'viewer-api');
     await expect(page.locator('.monaco-editor.readonly-editor')).toContainText(
       'component_answer',
       { timeout: 10_000 },

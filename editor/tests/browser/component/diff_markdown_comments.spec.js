@@ -1,11 +1,11 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 
 const rootSelector =
   '.diff-markdown-comments-host > .moonbit-diff-editor';
 const commentSelector = '.moonbit-viewer-markdown-comment';
 
 async function openFixture(page) {
-  await page.goto('/browser-tests/component.html?diffMarkdownComments=1');
+  await gotoBrowserScenario(page, 'diff-markdown-comments');
   await page.waitForFunction(() =>
     Boolean(globalThis.__diffMarkdownCommentsControls),
   );

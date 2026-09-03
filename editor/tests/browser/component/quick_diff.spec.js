@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 import {
   expectMoonBitReportPassed,
   installMoonBitReporter,
@@ -28,7 +28,7 @@ function rowWithPiece(page, pieceSelector) {
 test('quick diff: gutter shows added, modified, and deleted markers on the right lines', async ({ page }, testInfo) => {
   const reporter = await installMoonBitReporter(page);
   try {
-    await page.goto('/browser-tests/quick_diff.html');
+    await gotoBrowserScenario(page, 'quick-diff');
     await expect(page.locator(editor)).toContainText('bravo_changed', {
       timeout: 10_000,
     });

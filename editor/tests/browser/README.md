@@ -9,8 +9,8 @@ browser-suite authoring contracts.
 ```text
 support/    Playwright fixtures, app helpers, logging, reporter
 smoke/      user workflows against the workbench or embedded viewer
-component/  loaders/assertions for direct MoonBit Viewer pages
-moonbit/    js-target MoonBit scenario packages
+component/  Playwright drivers/assertions for direct MoonBit scenarios
+moonbit/    js-target scenario libraries plus the single runner executable
 ```
 
 `just test-browser-smoke` is the routine browser-correctness gate and runs both
@@ -20,8 +20,10 @@ the `smoke/` and `component/` directories.
   `support/app.js`; do not call deterministic state-control globals when a
   user path exists. Workbench files are selected through the sidebar and
   remote protocol—the active document is not URL state.
-- Component pages construct the public Viewer directly and report compact JSON
-  through `__readonlyEditorBrowserTestReport`. Playwright validates the report,
+- Component cases open the shared `/browser-tests/runner.html?scenario=<id>`
+  page. The selected MoonBit scenario constructs the public Viewer or focused
+  browser fixture and reports compact JSON through
+  `__readonlyEditorBrowserTestReport`. Playwright validates the report,
   visible state, and feature-specific browser contracts and owns final
   pass/fail. The shared harness records console messages and fails a passing
   test if it observed a console error, uncaught page error, failed request, or
@@ -33,7 +35,12 @@ the `smoke/` and `component/` directories.
   input/focus, DOM Range, iframe ownership, or a native animation frame. Root
   Viewer integration tests do not install a fake DOM or create an intermediate
   mounted white-box layer.
-- `component.html?browserGeometry=1` is the fixed geometry oracle: it embeds
+- The `base-browser` runner scenario is the real-DOM owner for
+  `editor/base/browser`: it covers iframe-owned focus, text-node event ancestry,
+  native Selection endpoints, pointer capture, owning-window fallback, and
+  monitor lifecycle. Keep deterministic animation-frame state in MoonBit unit
+  tests; do not reintroduce object-literal DOMs or replace browser globals.
+- The `browser-geometry` runner scenario is the fixed geometry oracle: it embeds
   tiny self-owned monospace and proportional TTF data URLs, awaits
   `document.fonts.ready`, and runs at deviceScaleFactor 1. Its Playwright suite
   compares public Viewer dimensions/positions with DOM Ranges and rendered
@@ -43,7 +50,7 @@ the `smoke/` and `component/` directories.
   scroll and viewport deliberately differ from the top window. Assertions
   cover owner-document mounting, overflowing page layout and its 15px/22px
   boundaries, plus focused-widget parking while its anchor is hidden.
-- `component.html?markdownDocument=1` mounts two public Viewers over shared
+- The `markdown-document` runner scenario mounts two public Viewers over shared
   services and an ordinary `.mbt.md` model. The suite uses real
   Range-derived `page.mouse` positions over semantic nested fence text; it
   never bypasses presentation routing or caret mapping through a test control.
@@ -94,8 +101,12 @@ the `smoke/` and `component/` directories.
 - Reporter callback: `__readonlyEditorBrowserTestReport`; the Playwright
   reporter stores received payloads in `__readonlyEditorBrowserTestReports`.
 
-MoonBit scenarios are built by `scripts/build-browser-tests.mbtx` into
-`web/dist/browser-tests/`. A report has the shape
+MoonBit scenarios are ordinary libraries statically imported by
+`tests/browser/moonbit/runner`, the suite's only executable. The staging script
+writes exactly `runner.html`, `runner.mjs`, and `runner.mjs.map` under
+`web/dist/browser-tests/`. Every Playwright `test()` still receives its own
+fresh browser context and page; sharing the HTML and executable does not share
+DOM, globals, storage, or scenario state between cases. A report has the shape
 `{"suite":"viewer_api","status":"passed","failures":[],"metrics":{}}`.
 
 Markdown diagnostic overlays assert the live resolved class/range/z-index

@@ -7,7 +7,7 @@
 // view-axis pixel math is caught only by the browser suite).
 
 ///|
-fn run_read_api_test() -> Unit {
+pub fn run_read_api_test() -> Unit {
   let ctx = @support.BrowserTestContext("read_api")
   let done = Ref(false)
   let uri = try! @base_common.Uri::from(

@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 import {
   expectMoonBitReportPassed,
   installMoonBitReporter,
@@ -34,7 +34,7 @@ const boxOf = async (locator) => {
 
 test('agent feedback: bubbles, glyph add flow, reply, remove, scroll', async ({ page }, testInfo) => {
   const reporter = await installMoonBitReporter(page);
-  await page.goto('/browser-tests/agent_feedback.html');
+  await gotoBrowserScenario(page, 'agent-feedback');
   await expect(page.locator('.monaco-editor.readonly-editor')).toContainText(
     'reviewed_area',
     { timeout: 10_000 },
