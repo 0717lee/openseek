@@ -78,6 +78,75 @@ pub fn DetailedLineRangeMapping::line_mapping(
 }
 
 ///|
+// Port of VS Code's `getLineRangeMapping` (`rangeMapping.ts`). Character
+// refinement can include the newline immediately before an EOF-only change;
+// derive the final line hunk from that mapping so both coordinate layers use
+// the same anchor.
+fn line_range_mapping_from_range_mapping(
+  range_mapping : RangeMapping,
+  original_lines : Array[String],
+  modified_lines : Array[String],
+) -> LineRangeMapping {
+  let mut line_start_delta = 0
+  let mut line_end_delta = 0
+  if range_mapping.modified.end_column == 1 &&
+    range_mapping.original.end_column == 1 &&
+    range_mapping.original.start_line_number + line_start_delta <=
+    range_mapping.original.end_line_number &&
+    range_mapping.modified.start_line_number + line_start_delta <=
+    range_mapping.modified.end_line_number {
+    line_end_delta = -1
+  }
+  if range_mapping.modified.start_column - 1 >=
+    modified_lines[range_mapping.modified.start_line_number - 1].length() &&
+    range_mapping.original.start_column - 1 >=
+    original_lines[range_mapping.original.start_line_number - 1].length() &&
+    range_mapping.original.start_line_number <=
+    range_mapping.original.end_line_number + line_end_delta &&
+    range_mapping.modified.start_line_number <=
+    range_mapping.modified.end_line_number + line_end_delta {
+    line_start_delta = 1
+  }
+  LineRangeMapping(
+    LineRange(
+      range_mapping.original.start_line_number + line_start_delta,
+      range_mapping.original.end_line_number + 1 + line_end_delta,
+    ),
+    LineRange(
+      range_mapping.modified.start_line_number + line_start_delta,
+      range_mapping.modified.end_line_number + 1 + line_end_delta,
+    ),
+  )
+}
+
+///|
+fn line_range_mapping_from_inner_changes(
+  inner_changes : Array[RangeMapping],
+  original_lines : Array[String],
+  modified_lines : Array[String],
+) -> LineRangeMapping? {
+  if inner_changes.is_empty() {
+    return None
+  }
+  let first = line_range_mapping_from_range_mapping(
+    inner_changes[0],
+    original_lines,
+    modified_lines,
+  )
+  let last = line_range_mapping_from_range_mapping(
+    inner_changes[inner_changes.length() - 1],
+    original_lines,
+    modified_lines,
+  )
+  Some(
+    LineRangeMapping(
+      first.original.join(last.original),
+      first.modified.join(last.modified),
+    ),
+  )
+}
+
+///|
 pub extend LineRangeMapping with Debug::{to_repr}
 
 ///|

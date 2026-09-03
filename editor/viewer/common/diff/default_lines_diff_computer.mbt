@@ -93,25 +93,33 @@ fn LineDocumentDiffProvider::compute_lines_diff(
   )
   let changes : Array[DetailedLineRangeMapping] = []
   for diff in line_diffs {
-    let original = @base_common.LineRange(
+    let original_line_range = @base_common.LineRange(
       diff.original.start + 1,
       diff.original.end_exclusive + 1,
     )
-    let modified = @base_common.LineRange(
+    let modified_line_range = @base_common.LineRange(
       diff.modified.start + 1,
       diff.modified.end_exclusive + 1,
     )
+    let inner_changes = compute_inner_changes(
+      original_lines,
+      modified_lines,
+      original_line_range,
+      modified_line_range,
+      options.ignore_trim_whitespace,
+    )
+    let line_mapping = match inner_changes {
+      Some(inner_changes) =>
+        line_range_mapping_from_inner_changes(
+          inner_changes, original_lines, modified_lines,
+        ).unwrap_or(LineRangeMapping(original_line_range, modified_line_range))
+      None => LineRangeMapping(original_line_range, modified_line_range)
+    }
     changes.push(
       DetailedLineRangeMapping(
-        original,
-        modified,
-        compute_inner_changes(
-          original_lines,
-          modified_lines,
-          original,
-          modified,
-          options.ignore_trim_whitespace,
-        ),
+        line_mapping.original,
+        line_mapping.modified,
+        inner_changes,
       ),
     )
   }
