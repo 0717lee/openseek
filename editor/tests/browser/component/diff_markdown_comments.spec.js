@@ -81,6 +81,135 @@ async function contentHeightState(page) {
   });
 }
 
+async function expectDecorationsLane(pane, expectedWidth) {
+  await expect.poll(() => pane.evaluate((node) => {
+    const margin = node.querySelector('.margin');
+    const lineNumber = node.querySelector('.line-numbers');
+    const toggle = node.querySelector(
+      '.moonbit-viewer-markdown-comment-margin-toggle',
+    );
+    if (!margin || !lineNumber || !toggle) return null;
+    const marginRect = margin.getBoundingClientRect();
+    const lineNumberRect = lineNumber.getBoundingClientRect();
+    return {
+      lane: marginRect.right - lineNumberRect.right,
+      toggle: Number.parseFloat(getComputedStyle(toggle).width),
+    };
+  })).toEqual({ lane: expectedWidth, toggle: expectedWidth });
+}
+
+test('keeps normal editor gutter room for comment and feedback controls', async ({ page }) => {
+  const root = await openFixture(page);
+  const original = root.locator('.moonbit-diff-editor-original');
+  const modified = root.locator('.moonbit-diff-editor-modified');
+
+  // Diff panes do not install the folding controller, but their shared
+  // comment/feedback lane still starts with the host's 10px base plus an
+  // explicit 16px diff-control reserve.
+  await expectDecorationsLane(modified, 26);
+
+  await control(page, 'set_feedback_enabled', true);
+  await expectDecorationsLane(modified, 44);
+
+  // DiffEditor reapplies its host options on every layout. Those updates must
+  // preserve the live 18px feedback reservation instead of shrinking the
+  // lane back to the host base.
+  await control(page, 'resize', 620);
+  await waitForFrames(page);
+  await expectDecorationsLane(modified, 44);
+
+  await control(page, 'set_layout', 'split');
+  await expectDecorationsLane(original, 44);
+  await expectDecorationsLane(modified, 44);
+
+  await control(page, 'set_layout', 'inline');
+  await expectDecorationsLane(modified, 44);
+  const inlineOriginalGeometry = await original.evaluate((node) => {
+    const host = node.getBoundingClientRect();
+    const margin = node.querySelector('.margin').getBoundingClientRect();
+    const lineNumber = Array.from(node.querySelectorAll('.line-numbers'))
+      .map((element) => element.getBoundingClientRect())
+      .find((rect) => rect.width > 0);
+    return {
+      hostWidth: host.width,
+      marginWidth: margin.width,
+      lineNumberWidth: lineNumber.right - host.left,
+    };
+  });
+  expect(Math.abs(
+    inlineOriginalGeometry.hostWidth - inlineOriginalGeometry.lineNumberWidth,
+  )).toBeLessThanOrEqual(0.5);
+  expect(inlineOriginalGeometry.hostWidth).toBeLessThan(
+    inlineOriginalGeometry.marginWidth,
+  );
+
+  const quietLine = modified.locator('.view-line', {
+    hasText: 'let before = 1',
+  });
+  await quietLine.hover();
+  const glyph = modified.locator(
+    '.margin-view-overlays .cldr.agent-feedback-glyph.line-hover',
+  );
+  await expect(glyph).toHaveCount(1);
+  const glyphGeometry = await glyph.evaluate((element) => {
+    const margin = element.closest('.margin').getBoundingClientRect();
+    const glyphRect = element.getBoundingClientRect();
+    const before = getComputedStyle(element, '::before');
+    const visibleLeft = glyphRect.left + Number.parseFloat(before.left);
+    const visibleRight = visibleLeft + Number.parseFloat(before.width);
+    return {
+      marginLeft: margin.left,
+      marginRight: margin.right,
+      visibleLeft,
+      visibleRight,
+    };
+  });
+  expect(glyphGeometry.visibleLeft).toBeGreaterThanOrEqual(
+    glyphGeometry.marginLeft - 0.5,
+  );
+  expect(glyphGeometry.visibleRight).toBeLessThanOrEqual(
+    glyphGeometry.marginRight + 0.5,
+  );
+
+  const glyphBox = await glyph.boundingBox();
+  expect(glyphBox).not.toBeNull();
+  await page.mouse.click(
+    glyphBox.x + glyphBox.width / 2,
+    glyphBox.y + glyphBox.height / 2,
+  );
+  await expect(
+    modified.locator('.agent-feedback-input-widget textarea'),
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  const comment = modified.locator(commentSelector);
+  const commentToggle = modified.locator(
+    '.moonbit-viewer-markdown-comment-margin-toggle',
+  );
+  await expect(commentToggle).toBeVisible();
+  await expect(comment).toHaveAttribute('data-documentation-expanded', 'false');
+  await commentToggle.click();
+  await expect(comment).toHaveAttribute('data-documentation-expanded', 'true');
+  await commentToggle.click();
+  await expect(comment).toHaveAttribute('data-documentation-expanded', 'false');
+});
+
+test('keeps diff controls independent of host folding settings', async ({ page }) => {
+  const root = await openFixture(page);
+  const modified = root.locator('.moonbit-diff-editor-modified');
+
+  await control(page, 'set_folding_mode', 'disabled');
+  await expectDecorationsLane(modified, 26);
+  await control(page, 'set_feedback_enabled', true);
+  await expectDecorationsLane(modified, 44);
+
+  await control(page, 'set_feedback_enabled', false);
+  await control(page, 'set_folding_mode', 'never');
+  await expectDecorationsLane(modified, 26);
+  await control(page, 'set_feedback_enabled', true);
+  await expectDecorationsLane(modified, 44);
+});
+
 test('keeps rich comments in both split panes and only the modified inline pane', async ({ page }) => {
   const root = await openFixture(page);
   const original = root.locator('.moonbit-diff-editor-original');

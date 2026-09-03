@@ -13,6 +13,7 @@ test "CodeEditorOptions builders preserve an immutable opaque snapshot" {
     .with_soft_wrap(true)
     .with_line_numbers_min_chars(3)
     .with_line_decorations_width(17)
+    .with_additional_line_decorations_width(6)
     .with_line_height(21.0)
   assert_eq(
     updated,
@@ -27,7 +28,7 @@ test "CodeEditorOptions builders preserve an immutable opaque snapshot" {
       tab_size=4,
       soft_wrap=true,
       line_numbers_min_chars=3,
-      line_decorations_width=17,
+      line_decorations_width=23,
       line_height=21.0,
     ),
   )
@@ -50,5 +51,9 @@ test "CodeEditorOptions builders preserve constructor normalization" {
   assert_eq(
     CodeEditorOptions::default().with_line_decorations_width(-1),
     CodeEditorOptions(line_decorations_width=0),
+  )
+  assert_eq(
+    CodeEditorOptions::default().with_additional_line_decorations_width(-1),
+    CodeEditorOptions::default(),
   )
 }

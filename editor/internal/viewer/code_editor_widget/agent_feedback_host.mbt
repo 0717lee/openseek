@@ -181,6 +181,32 @@ fn CodeEditorWidget::on_agent_feedback_model_changed(
 // --- reserved lane ----------------------------------------------------------------
 
 ///|
+/// Applies a complete host-owned options snapshot without dropping the
+/// contribution-owned gutter reservation. DiffEditor replays its saved pane
+/// options during every layout; once feedback is enabled, that replay must
+/// rebase the saved lane width and then add the 18px feedback lane again.
+///
+/// The feedback contribution itself continues to call `update_options`
+/// directly when it first reserves or finally restores the lane, because
+/// those calls already contain the effective width.
+pub fn CodeEditorWidget::update_host_options(
+  self : CodeEditorWidget,
+  options : CodeEditorOptions,
+) -> Unit {
+  guard self.agent_feedback_input_contribution() is Some(ic) &&
+    ic.lane_base_width is Some(_) else {
+    self.update_options(options)
+    return
+  }
+  ic.lane_base_width = Some(options.line_decorations_width)
+  self.update_options({
+    ..options,
+    line_decorations_width: options.line_decorations_width +
+    agent_feedback_reserved_gutter_px,
+  })
+}
+
+///|
 /// `_updateReservedGutterSpace`: reserve extra room in the line-decorations
 /// margin while the resource offers feedback, restore the host's base width
 /// when it no longer does (the comments contrib's store/restore shape; the

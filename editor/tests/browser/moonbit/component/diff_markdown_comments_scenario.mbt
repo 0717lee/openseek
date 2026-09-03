@@ -90,6 +90,34 @@ fn diff_markdown_comment_partial_modified_source() -> String {
 }
 
 ///|
+fn diff_markdown_comment_editor_options(
+  folding_mode : String,
+) -> @viewer.ViewerOptions {
+  match folding_mode {
+    "disabled" =>
+      ViewerOptions(
+        soft_wrap=true,
+        smooth_scrolling=false,
+        line_numbers_min_chars=1,
+        folding=false,
+      )
+    "never" =>
+      ViewerOptions(
+        soft_wrap=true,
+        smooth_scrolling=false,
+        line_numbers_min_chars=1,
+        show_folding_controls=Never,
+      )
+    _ =>
+      ViewerOptions(
+        soft_wrap=true,
+        smooth_scrolling=false,
+        line_numbers_min_chars=1,
+      )
+  }
+}
+
+///|
 priv struct DiffMarkdownCommentProvider {}
 
 ///|
@@ -158,21 +186,20 @@ fn run_diff_markdown_comments_test() -> Unit {
     foldable=true,
   )
   |> ignore
+  let feedback = @feedback_contrib.AgentFeedbackService()
   let services = @viewer.ViewerServices(
+    agent_feedback=feedback.agent_feedback_handle(),
     languages=languages.language_handle(log_service.log_handle()),
     log_service=log_service.log_handle(),
   )
-  let editor_options = @viewer.ViewerOptions(
-    soft_wrap=true,
-    smooth_scrolling=false,
-    line_numbers_min_chars=1,
-  )
+  let editor_options = Ref(diff_markdown_comment_editor_options("default"))
+  let layout : Ref[@viewer.DiffEditorLayout] = Ref(Inline)
   let diff_editor = @viewer.DiffEditor::create(
     host,
     services~,
     options=DiffEditorOptions(
-      editor_options~,
-      layout=Inline,
+      editor_options=editor_options.val,
+      layout=layout.val,
       automatic_inline=false,
     ),
   )
@@ -238,18 +265,32 @@ fn run_diff_markdown_comments_test() -> Unit {
       diff_editor.set_model(Some(pair)) |> ignore
     },
     layout_name => {
-      let layout : @viewer.DiffEditorLayout = if layout_name == "inline" {
-        Inline
-      } else {
-        SideBySide
-      }
+      layout.val = if layout_name == "inline" { Inline } else { SideBySide }
       diff_editor.update_options(
-        DiffEditorOptions(editor_options~, layout~, automatic_inline=false),
+        DiffEditorOptions(
+          editor_options=editor_options.val,
+          layout=layout.val,
+          automatic_inline=false,
+        ),
       )
     },
     width => {
       host.set_attribute("style", "width:\{width}px;height:640px;")
       diff_editor.layout()
+    },
+    enabled => {
+      feedback.set_feedback_enabled(unchanged_original.uri, enabled)
+      feedback.set_feedback_enabled(unchanged_modified.uri, enabled)
+    },
+    folding_mode => {
+      editor_options.val = diff_markdown_comment_editor_options(folding_mode)
+      diff_editor.update_options(
+        DiffEditorOptions(
+          editor_options=editor_options.val,
+          layout=layout.val,
+          automatic_inline=false,
+        ),
+      )
     },
     () => {
       auto_height_enabled.val = true
@@ -265,15 +306,19 @@ extern "js" fn install_diff_markdown_comments_controls(
   set_fixture : (String) -> Unit,
   set_layout : (String) -> Unit,
   resize : (Int) -> Unit,
+  set_feedback_enabled : (Bool) -> Unit,
+  set_folding_mode : (String) -> Unit,
   enable_auto_height : () -> Unit,
   content_height_event_count : () -> Int,
   content_height : () -> Double,
 ) -> Unit =
-  #| (setFixture, setLayout, resize, enableAutoHeight, contentHeightEventCount, contentHeight) => {
+  #| (setFixture, setLayout, resize, setFeedbackEnabled, setFoldingMode, enableAutoHeight, contentHeightEventCount, contentHeight) => {
   #|   globalThis.__diffMarkdownCommentsControls = Object.freeze({
   #|     set_fixture: setFixture,
   #|     set_layout: setLayout,
   #|     resize,
+  #|     set_feedback_enabled: setFeedbackEnabled,
+  #|     set_folding_mode: setFoldingMode,
   #|     enable_auto_height: enableAutoHeight,
   #|     content_height_event_count: contentHeightEventCount,
   #|     content_height: contentHeight,

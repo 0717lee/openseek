@@ -73,6 +73,7 @@ pub fn CodeEditorOptions::equal(Self, Self) -> Bool
 pub fn CodeEditorOptions::line_height(Self) -> Double
 pub fn CodeEditorOptions::not_equal(Self, Self) -> Bool
 pub fn CodeEditorOptions::soft_wrap(Self) -> Bool
+pub fn CodeEditorOptions::with_additional_line_decorations_width(Self, Int) -> Self
 pub fn CodeEditorOptions::with_folding(Self, Bool) -> Self
 pub fn CodeEditorOptions::with_font_family(Self, String) -> Self
 pub fn CodeEditorOptions::with_font_size(Self, Double) -> Self
@@ -286,6 +287,7 @@ pub fn CodeEditorWidget::set_selection(Self, @core.Selection, source? : String) 
 pub fn CodeEditorWidget::set_selections(Self, Array[@core.Selection], source? : String, reason? : @editor_api.CursorChangeReason) -> Unit
 pub fn CodeEditorWidget::set_value(Self, String) -> Unit
 pub fn CodeEditorWidget::show_references(Self, @common.Position, Array[@language.Location]) -> Unit
+pub fn CodeEditorWidget::update_host_options(Self, CodeEditorOptions) -> Unit
 pub fn CodeEditorWidget::update_options(Self, CodeEditorOptions) -> Unit
 
 type EditorDecorationsCollection
