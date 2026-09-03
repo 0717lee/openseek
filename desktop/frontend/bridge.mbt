@@ -1712,3 +1712,37 @@ fn open_file(
     })
   })
 }
+
+///|
+/// Ask the local conversation host to show one referenced path in the system
+/// file manager. Unlike `open_file`, this never changes the editor panel.
+fn reveal_file(
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  session : String,
+  cwd : @common.Uri,
+  path : String,
+) -> @cmd.Cmd {
+  guard channel is Local && @resource.belongs_to(cwd, channel) else {
+    return @cmd.none
+  }
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let reply : @protocol.RevealPathReply = @interop.bridge_request(
+        channel,
+        @commands.host_reveal_path,
+        { session, cwd: Some(cwd.path), path, },
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(HostActionFailed(@interop.bridge_error_text(error))),
+          )
+          return
+        }
+      }
+      if reply is RevealRefused(message) {
+        scheduler.add(dispatch(HostActionFailed(message)))
+      }
+    })
+  })
+}

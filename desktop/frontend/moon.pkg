@@ -17,6 +17,7 @@ import {
   "openseek_desktop/internal/protocol",
   "openseek_desktop/internal/commands",
   "openseek_desktop/frontend/bridge",
+  "openseek_desktop/frontend/action_menu",
   "openseek_desktop/frontend/dismiss",
   "openseek_desktop/frontend/dock",
   "openseek_desktop/frontend/codex",

@@ -10,6 +10,8 @@ pub async fn open_path(String) -> Int
 
 pub async fn open_url(String) -> Int
 
+pub async fn reveal_path(String) -> Int
+
 // Errors
 
 // Types and methods

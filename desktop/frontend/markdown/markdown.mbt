@@ -623,6 +623,7 @@ fn file_link_node(
     class="file-link",
     type_="button",
     title="Open \{path}",
+    attrs=@html.Attrs::build().data_set("context-file", path),
     on_click=open(path),
     children,
   )

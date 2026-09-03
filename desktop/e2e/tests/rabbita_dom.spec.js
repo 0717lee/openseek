@@ -738,7 +738,62 @@ test('transcript Markdown keeps links safe and loads local raster bytes through 
   const external = markdown.getByRole('link', { name: 'External docs' });
   await expect(external).toHaveAttribute('target', '_blank');
   await expect(external).toHaveAttribute('rel', 'noopener noreferrer');
-  await markdown.getByTitle('Open src/main.mbt:12').click();
+  await external.click({ button: 'right' });
+  let contextMenu = page.getByRole('menu', { name: 'Context menu' });
+  await expect(contextMenu.getByRole('menuitem')).toHaveText([
+    'Open in New Tab',
+    'Copy Link',
+  ]);
+  const popupPromise = page.waitForEvent('popup');
+  const navigationPromise = page.context().waitForEvent('request', {
+    predicate: request => request.url() === 'https://example.test/docs',
+  });
+  await contextMenu.getByRole('menuitem', { name: 'Open in New Tab' }).click();
+  const popup = await popupPromise;
+  await navigationPromise;
+  await popup.close();
+
+  const source = markdown.getByTitle('Open src/main.mbt:12');
+  await source.click({ button: 'right' });
+  contextMenu = page.getByRole('menu', { name: 'Context menu' });
+  await expect(contextMenu.getByRole('menuitem')).toHaveText([
+    'Open',
+    'Copy Path',
+  ]);
+  await page.keyboard.press('Escape');
+
+  const unsafe = markdown.getByText('Unsafe', { exact: true });
+  await unsafe.evaluate(element => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = document.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const rect = range.getBoundingClientRect();
+    element.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.left + Math.max(1, rect.width / 2),
+      clientY: rect.top + Math.max(1, rect.height / 2),
+    }));
+  });
+  contextMenu = page.getByRole('menu', { name: 'Context menu' });
+  await expect(contextMenu.getByRole('menuitem')).toHaveText(['Copy']);
+  await page.keyboard.press('Escape');
+
+  const ordinaryEventAllowed = await page.getByRole('main').evaluate(element => {
+    document.getSelection()?.removeAllRanges();
+    return element.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 4,
+      clientY: 4,
+    }));
+  });
+  expect(ordinaryEventAllowed).toBe(false);
+  await expect(page.getByRole('menu', { name: 'Context menu' })).toHaveCount(0);
+
+  await source.click();
   await expect.poll(() => app.requests.find(request =>
     request.method === 'host.open_path' && request.params?.path === 'src/main.mbt:12'))
     .toBeTruthy();

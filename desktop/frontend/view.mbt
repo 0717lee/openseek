@@ -1690,9 +1690,10 @@ fn view(
   composer_html : @html.Html,
   codex_composer_html : @html.Html,
   sidebar_html : @html.Html,
-  quick_open_html : @html.Html,
+  quick_open_and_context_menu : (@html.Html, @html.Html),
   skills_and_workspace_settings : (@html.Html, @html.Html),
 ) -> @html.Html {
+  let (quick_open_html, context_menu_html) = quick_open_and_context_menu
   let (skills_html, workspace_settings_html) = skills_and_workspace_settings
   // A browser page is gated on both its relay session and its required
   // query-selected device. Until both exist, the console frame — sidebar,
@@ -1874,6 +1875,7 @@ fn view(
   // Rendered whether or not the palette is open — closed it is an empty
   // placeholder — so opening it never shifts the overlay children around it.
   children.push(quick_open_html)
+  children.push(context_menu_html)
   // On the desktop a lost connection covers everything: with no event
   // stream and every API call failing, the app behind it can do nothing,
   // so an honest dead-end beats a half-broken UI. The console keeps its last

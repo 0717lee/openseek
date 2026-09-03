@@ -98,6 +98,26 @@ fn app_shortcut_platform_is_apple() -> Bool {
 }
 
 ///|
+fn Model::context_menu_input(self : Model) -> @action_menu.ContextInput {
+  let platform = if !self.is_desktop {
+    @action_menu.Web
+  } else if browser_platform_is_apple(app_shortcut_browser_platform()) {
+    @action_menu.MacOS
+  } else if @common.platform_is_win32() {
+    @action_menu.Windows
+  } else {
+    @action_menu.Linux
+  }
+  // The client platform names the file manager, so only a checkout on this
+  // same Desktop may expose reveal. `Open` remains available for remote hosts
+  // through the existing host-addressed file-link route.
+  let reveal_files = self.is_desktop &&
+    self.active_checkout() is Some(active) &&
+    active.owner.channel is Local
+  { platform, reveal_files, }
+}
+
+///|
 /// Map only the platform's exact, non-repeating command chords to the same
 /// messages used by their corresponding UI buttons.
 fn app_shortcut_message(keyboard : @dom.KeyboardEvent, is_apple : Bool) -> Msg? {
@@ -541,6 +561,15 @@ pub fn boot() -> Unit {
       state.map(model => model.quick_open),
       emit.map(msg => QuickOpen(msg)),
     )
+    let context_menu_html = @action_menu.context_component(
+      state.map(model => model.context_menu_input()),
+      {
+        open_link: url => emit(ExternalLinkClicked(url)),
+        open_external_link: url => open_external_link(emit, url),
+        open_file: path => emit(OpenFile(path)),
+        reveal_file: path => emit(RevealFile(path)),
+      },
+    )
     let skills_html = @skills.component(
       state.map(model => model.skills_input()),
       state.map(model => model.skills),
@@ -563,12 +592,17 @@ pub fn boot() -> Unit {
         },
       },
     )
-    // `Val::view9` is rabbita's widest composition; the two settings pages
-    // share one slot as a pair.
+    // `Val::view9` is rabbita's widest composition. Stable overlay pairs share
+    // one slot each without moving their state into the root model.
     let skills_and_workspace_settings = @rabbita.Val::map2(
       skills_html,
       workspace_settings_html,
       (skills, workspace_settings) => (skills, workspace_settings),
+    )
+    let quick_open_and_context_menu = @rabbita.Val::map2(
+      quick_open_html,
+      context_menu_html,
+      (quick_open, context_menu) => (quick_open, context_menu),
     )
     state.view9(
       terminal_html,
@@ -577,7 +611,7 @@ pub fn boot() -> Unit {
       composer_html,
       codex_composer_html,
       sidebar_html,
-      quick_open_html,
+      quick_open_and_context_menu,
       skills_and_workspace_settings,
       (
         model,
@@ -587,7 +621,7 @@ pub fn boot() -> Unit {
         composer_html,
         codex_composer_html,
         sidebar_html,
-        quick_open_html,
+        quick_open_and_context_menu,
         skills_and_workspace_settings,
       ) => {
         view(
@@ -601,7 +635,7 @@ pub fn boot() -> Unit {
           composer_html,
           codex_composer_html,
           sidebar_html,
-          quick_open_html,
+          quick_open_and_context_menu,
           skills_and_workspace_settings,
         )
       },

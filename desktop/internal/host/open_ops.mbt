@@ -4,16 +4,25 @@
 // Position suffixes apply only to built-in text files.
 
 ///|
-/// Refusals travel inside the reply as `Refused(message)` rather than as a
-/// raised error: the local bridge flattens a raise to the generic
-/// "op ext:openseek/host.open_path failed" and hides the reason.
-async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
+priv struct ResolvedHostReference {
+  base : @pathx.Absolute?
+  resolution : @openpath.Resolution
+}
+
+///|
+/// Resolve one transcript path once for both Open and Show in Folder. Keeping
+/// cwd fallback, home expansion, position suffixes, and missing-path handling
+/// here prevents the two user actions from drifting into different security
+/// or path semantics.
+async fn resolve_host_reference(
+  payload : OpenPathPayload,
+) -> Result[ResolvedHostReference, String] {
   // A live run hands us its cwd; a resumed conversation has none, so fall back
   // to the directory the session's engine runs in.
   let base = match payload.cwd {
     Some(cwd) => {
       guard @pathx.Absolute::from_uri_path(cwd) is Some(cwd) else {
-        return refusal("Invalid working directory")
+        return Err("Invalid working directory")
       }
       Some(cwd)
     }
@@ -23,14 +32,28 @@ async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
   // Absolute system targets do not need a conversation checkout. Relative
   // paths still need one so they never fall back to the host process's cwd.
   if base is None && !path.is_host_absolute() {
-    return refusal("This conversation has no working directory")
+    return Err("This conversation has no working directory")
   }
   let target = @work_dir.open_target(base, path)
-  guard !target.0.is_empty() else { return refusal("Empty path") }
+  guard !target.0.is_empty() else { return Err("Empty path") }
   let resolution = @openpath.Reference(target.0).resolve()
   if resolution is MissingPath(path) {
-    return refusal("File does not exist: \{path}")
+    return Err("File does not exist: \{path}")
   }
+  Ok({ base, resolution, })
+}
+
+///|
+/// Refusals travel inside the reply as `Refused(message)` rather than as a
+/// raised error: the local bridge flattens a raise to the generic
+/// "op ext:openseek/host.open_path failed" and hides the reason.
+async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
+  let reference = match resolve_host_reference(payload) {
+    Ok(reference) => reference
+    Err(message) => return refusal(message)
+  }
+  let base = reference.base
+  let resolution = reference.resolution
   if resolution is EditorPath(path~, line~, column~) {
     guard base is Some(root) else {
       return refusal("This conversation has no working directory")
@@ -103,6 +126,39 @@ async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
   }
   guard code == 0 else { return refusal("Could not open \{system_path}") }
   Opened
+}
+
+///|
+/// Resolve and reveal the same path that `open_path` would route, but never
+/// substitute the built-in editor or a default application for the file
+/// manager. Position suffixes identify the underlying file.
+async fn reveal_path_op(payload : OpenPathPayload) -> RevealPathReply {
+  let reference = match resolve_host_reference(payload) {
+    Ok(reference) => reference
+    Err(message) => return RevealRefused(message)
+  }
+  let path = match reference.resolution {
+    EditorPath(path~, ..) => path
+    SystemPath(path) => path
+    MissingPath(path) => return RevealRefused("File does not exist: \{path}")
+  }
+  let code = @platform.reveal_path(path) catch {
+    error if @async.is_being_cancelled() => raise error
+    error => return RevealRefused("Could not show \{path}: \{error}")
+  }
+  if code == 0 {
+    Revealed
+  } else {
+    RevealRefused("Could not show \{path}")
+  }
+}
+
+///|
+async test "reveal_path shares open_path reference refusals" {
+  let root = @fs.tmpdir(prefix="openseek-host-reveal-missing-")
+  let missing = "\{root}/missing.mbt:12"
+  let reply = reveal_path_op({ session: "", cwd: None, path: missing, })
+  assert_eq(reply, RevealRefused("File does not exist: \{root}/missing.mbt"))
 }
 
 ///|

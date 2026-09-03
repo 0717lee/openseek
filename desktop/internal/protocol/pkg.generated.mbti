@@ -1639,6 +1639,18 @@ pub fn ReadFileReply::to_repr(Self) -> @debug.Repr
 pub impl ToJson for ReadFileReply
 pub impl @json.FromJson for ReadFileReply
 
+pub(all) enum RevealPathReply {
+  Revealed
+  RevealRefused(String)
+} derive(Eq, @debug.Debug)
+pub fn RevealPathReply::equal(Self, Self) -> Bool
+pub fn RevealPathReply::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn RevealPathReply::not_equal(Self, Self) -> Bool
+pub fn RevealPathReply::to_json(Self) -> Json
+pub fn RevealPathReply::to_repr(Self) -> @debug.Repr
+pub impl ToJson for RevealPathReply
+pub impl @json.FromJson for RevealPathReply
+
 pub(all) struct RunSettlementPayload {
   run_id : String
   session : String

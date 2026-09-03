@@ -945,6 +945,42 @@ pub impl FromJson for OpenPathReply with fn from_json(json, path) {
 }
 
 ///|
+/// Result of asking the host file manager to show a referenced path. A
+/// refusal remains data so the frontend can display the host's exact reason
+/// instead of the bridge's generic endpoint failure.
+pub(all) enum RevealPathReply {
+  Revealed
+  RevealRefused(String)
+} derive(Debug, Eq)
+
+///|
+pub impl ToJson for RevealPathReply with fn to_json(self) {
+  match self {
+    Revealed => { "revealed": true }
+    RevealRefused(message) => { "revealed": false, "error": message }
+  }
+}
+
+///|
+pub impl FromJson for RevealPathReply with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected a reveal_path reply"))
+  }
+  match fields.get("revealed") {
+    Some(True) => Revealed
+    Some(False) =>
+      match fields.get("error") {
+        Some(String(message)) => RevealRefused(message)
+        _ =>
+          raise JsonDecodeError(
+            (path.add_key("error"), "reveal_path refusal must name an error"),
+          )
+      }
+    _ => raise JsonDecodeError((path, "reveal_path reply names no outcome"))
+  }
+}
+
+///|
 pub(all) struct ApplyUpdateReply {
   applied : Bool
 } derive(Debug, Eq, FromJson, ToJson)
@@ -2870,3 +2906,15 @@ pub extend SemanticSearchHit with Eq::{equal, not_equal}
 
 ///|
 pub extend SemanticSearchHit with ToJson::{to_json}
+
+///|
+pub extend RevealPathReply with Debug::{to_repr}
+
+///|
+pub extend RevealPathReply with FromJson::{from_json}
+
+///|
+pub extend RevealPathReply with Eq::{equal, not_equal}
+
+///|
+pub extend RevealPathReply with ToJson::{to_json}

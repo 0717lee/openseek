@@ -384,6 +384,18 @@ test "open-path replies distinguish system, editor, and directory targets" {
 }
 
 ///|
+test "reveal-path replies preserve success and refusal" {
+  let replies : Array[@protocol.RevealPathReply] = [
+    Revealed,
+    RevealRefused("File does not exist: missing.mbt"),
+  ]
+  for reply in replies {
+    let decoded : @protocol.RevealPathReply = @json.from_json(reply.to_json())
+    @debug.assert_eq(decoded, reply)
+  }
+}
+
+///|
 test "archive replies keep success compatible and encode dirty confirmation" {
   let sessions : @protocol.SessionsReply = { groups: [], }
   let success = @protocol.ArchiveReply::Archived(sessions)
