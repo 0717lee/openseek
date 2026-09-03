@@ -1656,10 +1656,7 @@ fn Model::selected_conversation_loaded(self : Model) -> Bool {
 
 ///|
 fn conversation_loading_view() -> @html.Html {
-  @html.div(class="conversation-load-state", [
-    @html.span(class="conversation-load-state-spinner", ""),
-    @html.span("Loading conversation…"),
-  ])
+  @html.div(class="conversation-load-state", "Loading conversation…")
 }
 
 ///|
