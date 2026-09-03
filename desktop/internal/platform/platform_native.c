@@ -11,6 +11,7 @@
 #if defined(_WIN32)
 
 #include <windows.h>
+#include <objbase.h>
 #include <shellapi.h>
 #include <shlobj.h>
 
@@ -19,6 +20,7 @@
 #endif
 
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "ole32.lib")
 #pragma comment(linker, "/SUBSYSTEM:WINDOWS")
 #pragma comment(linker, "/ENTRY:mainCRTStartup")
 
@@ -53,30 +55,38 @@ moonbit_openseek_desktop_platform_reveal(moonbit_string_t target) {
    * preserves spaces and punctuation as path data and selects the target in
    * its parent directory, matching Finder's `open -R` behavior.
    */
+  HRESULT com = CoInitializeEx(
+      NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+  if (FAILED(com) && com != RPC_E_CHANGED_MODE) {
+    return 1;
+  }
+  const BOOL uninitialize_com = SUCCEEDED(com);
   PIDLIST_ABSOLUTE item = ILCreateFromPathW((const wchar_t *)target);
-  if (item == NULL) {
-    return 1;
-  }
-  PIDLIST_ABSOLUTE parent = ILCloneFull(item);
-  if (parent == NULL) {
-    ILFree(item);
-    return 1;
-  }
-  PCUITEMID_CHILD child = ILFindLastID(item);
+  PIDLIST_ABSOLUTE parent = item == NULL ? NULL : ILCloneFull(item);
   HRESULT result = E_FAIL;
-  if (child != NULL && child->mkid.cb != 0 && ILRemoveLastID(parent)) {
-    result = SHOpenFolderAndSelectItems(parent, 1, &child, 0);
-  } else {
-    /* A filesystem root has no selectable child; opening it is the closest
-       meaningful file-manager action. */
-    INT_PTR opened = (INT_PTR)ShellExecuteW(
-        NULL, L"open", (const wchar_t *)target, NULL, NULL, SW_SHOWNORMAL);
-    if (opened > 32) {
-      result = S_OK;
+  if (parent != NULL) {
+    PCUITEMID_CHILD child = ILFindLastID(item);
+    if (child != NULL && child->mkid.cb != 0 && ILRemoveLastID(parent)) {
+      result = SHOpenFolderAndSelectItems(parent, 1, &child, 0);
+    } else {
+      /* A filesystem root has no selectable child; opening it is the closest
+         meaningful file-manager action. */
+      INT_PTR opened = (INT_PTR)ShellExecuteW(
+          NULL, L"open", (const wchar_t *)target, NULL, NULL, SW_SHOWNORMAL);
+      if (opened > 32) {
+        result = S_OK;
+      }
     }
   }
-  ILFree(parent);
-  ILFree(item);
+  if (parent != NULL) {
+    ILFree(parent);
+  }
+  if (item != NULL) {
+    ILFree(item);
+  }
+  if (uninitialize_com) {
+    CoUninitialize();
+  }
   return SUCCEEDED(result) ? 0 : 1;
 #else
   (void)target;

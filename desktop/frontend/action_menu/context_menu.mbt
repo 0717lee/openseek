@@ -14,6 +14,9 @@ pub(all) enum ClientPlatform {
 ///|
 pub(all) struct ContextInput {
   platform : ClientPlatform
+  // Whether ordinary web links have a visible in-app Browser destination on
+  // the current screen. This is a screen capability, not a platform fact.
+  open_web_links_in_app : Bool
   // Reveal is intentionally local-window-only. A browser or a Desktop viewing
   // a remote host must not unexpectedly open a file manager on another device.
   reveal_files : Bool
@@ -56,7 +59,7 @@ priv struct ContextState {
 
 ///|
 priv enum ContextMsg {
-  Requested(ContextRequest, Int, Int)
+  Requested(ContextRequest, Int, Int, String?)
   CloseContext
 }
 
@@ -64,44 +67,102 @@ priv enum ContextMsg {
 const GlobalContextTarget : String = "app-context-menu"
 
 ///|
-fn context_target(
-  kind : String,
-  value : String,
-  detail : String,
-) -> ContextTarget {
+fn context_string_field(value : @js.Value, key : String) -> String? {
+  let field : @js.Value = value.get_with_string(key)
+  if field.is_string() {
+    Some(field.cast())
+  } else {
+    None
+  }
+}
+
+///|
+fn context_target(value : @js.Value) -> Result[ContextTarget, Unit] {
+  if value.is_null() {
+    return Ok(NoTarget)
+  }
+  if value.is_undefined() {
+    return Err(())
+  }
+  guard context_string_field(value, "kind") is Some(kind) else {
+    return Err(())
+  }
   match kind {
-    "web" => WebLink(value)
-    "email" => EmailLink(url=value, address=detail)
-    "file" => FileLink(value)
-    _ => NoTarget
+    "web" =>
+      match context_string_field(value, "url") {
+        Some(url) => Ok(WebLink(url))
+        None => Err(())
+      }
+    "email" =>
+      match
+        (
+          context_string_field(value, "url"),
+          context_string_field(value, "address"),
+        ) {
+        (Some(url), Some(address)) => Ok(EmailLink(url~, address~))
+        _ => Err(())
+      }
+    "file" =>
+      match context_string_field(value, "path") {
+        Some(path) => Ok(FileLink(path))
+        None => Err(())
+      }
+    _ => Err(())
+  }
+}
+
+///|
+fn optional_context_string(value : @js.Value) -> Result[String?, Unit] {
+  if value.is_null() {
+    Ok(None)
+  } else if value.is_string() {
+    Ok(Some(value.cast()))
+  } else {
+    Err(())
   }
 }
 
 ///|
 fn context_request(
-  kind : String,
-  value : String,
-  detail : String,
-  has_selection : Bool,
-  selected_text : String,
-) -> ContextRequest {
-  {
-    target: context_target(kind, value, detail),
-    selected_text: if has_selection {
-      Some(selected_text)
-    } else {
-      None
-    },
+  target : @js.Value,
+  selected_text : @js.Value,
+) -> ContextRequest? {
+  match (context_target(target), optional_context_string(selected_text)) {
+    (Ok(target), Ok(selected_text)) => Some({ target, selected_text, })
+    _ => None
   }
 }
 
 ///|
 extern "js" fn install_context_menu_listener(
   close : () -> Unit,
-  open : (String, String, String, Bool, String, Int, Int) -> Unit,
+  open : (@js.Value, @js.Value, @js.Value, Int, Int) -> Unit,
 ) -> @js.Value =
   #| (close, open) => {
   #|   let rememberedSelection = null;
+  #|   let temporaryFocus = null;
+  #|   let nextFocusId = 0;
+  #|
+  #|   const discardTemporaryFocus = () => {
+  #|     if (temporaryFocus &&
+  #|         temporaryFocus.getAttribute("data-action-menu-temporary-focus") === temporaryFocus.id) {
+  #|       temporaryFocus.removeAttribute("data-action-menu-temporary-focus");
+  #|       temporaryFocus.removeAttribute("id");
+  #|     }
+  #|     temporaryFocus = null;
+  #|   };
+  #|
+  #|   const rememberFocus = () => {
+  #|     discardTemporaryFocus();
+  #|     const active = document.activeElement;
+  #|     if (!(active instanceof HTMLElement) || active === document.body) return null;
+  #|     if (active.id) return active.id;
+  #|     const id = `app-context-focus:${++nextFocusId}`;
+  #|     active.id = id;
+  #|     active.setAttribute("data-action-menu-temporary-focus", id);
+  #|     temporaryFocus = active;
+  #|     return id;
+  #|   };
   #|
   #|   const eventElement = (event) => {
   #|     const target = event.target;
@@ -149,7 +210,10 @@ extern "js" fn install_context_menu_listener(
   #|   // Closing in capture means an editor-owned menu that stops propagation
   #|   // still dismisses this surface. An unhandled event reopens it in the
   #|   // bubble listener below, after every more-specific owner had a chance.
-  #|   const onContextCapture = () => close();
+  #|   const onContextCapture = () => {
+  #|     discardTemporaryFocus();
+  #|     close();
+  #|   };
   #|
   #|   const onContextMenu = (event) => {
   #|     if (event.defaultPrevented) return;
@@ -166,25 +230,22 @@ extern "js" fn install_context_menu_listener(
   #|     }
   #|     rememberedSelection = null;
   #|
-  #|     let kind = "none";
-  #|     let value = "";
-  #|     let detail = "";
+  #|     let target = null;
   #|     const file = element.closest?.("[data-context-file]");
   #|     if (file) {
-  #|       kind = "file";
-  #|       value = file.getAttribute("data-context-file") ?? "";
+  #|       const path = file.getAttribute("data-context-file");
+  #|       if (path !== null) target = { kind: "file", path };
   #|     } else {
   #|       const anchor = element.closest?.("a[href]");
   #|       if (anchor && !anchor.hasAttribute("download")) {
   #|         const protocol = anchor.protocol.toLowerCase();
   #|         if (protocol === "http:" || protocol === "https:") {
-  #|           kind = "web";
-  #|           value = anchor.href;
+  #|           target = { kind: "web", url: anchor.href };
   #|         } else if (protocol === "mailto:") {
-  #|           kind = "email";
-  #|           value = anchor.href;
   #|           const raw = anchor.getAttribute("href")?.slice(7).split("?")[0] ?? "";
-  #|           try { detail = decodeURIComponent(raw); } catch (_) { detail = raw; }
+  #|           let address = raw;
+  #|           try { address = decodeURIComponent(raw); } catch (_) {}
+  #|           target = { kind: "email", url: anchor.href, address };
   #|         }
   #|       }
   #|     }
@@ -203,11 +264,9 @@ extern "js" fn install_context_menu_listener(
   #|       y = rect.bottom;
   #|     }
   #|     open(
-  #|       kind,
-  #|       value,
-  #|       detail,
-  #|       selected !== null,
-  #|       selected ?? "",
+  #|       target,
+  #|       selected,
+  #|       rememberFocus(),
   #|       Math.round(x),
   #|       Math.round(y),
   #|     );
@@ -216,7 +275,7 @@ extern "js" fn install_context_menu_listener(
   #|   document.addEventListener("mousedown", onMouseDown, true);
   #|   document.addEventListener("contextmenu", onContextCapture, true);
   #|   document.addEventListener("contextmenu", onContextMenu);
-  #|   return { onMouseDown, onContextCapture, onContextMenu };
+  #|   return { onMouseDown, onContextCapture, onContextMenu, discardTemporaryFocus };
   #| }
 
 ///|
@@ -225,6 +284,7 @@ extern "js" fn remove_context_menu_listener(listeners : @js.Value) -> Unit =
   #|   document.removeEventListener("mousedown", listeners.onMouseDown, true);
   #|   document.removeEventListener("contextmenu", listeners.onContextCapture, true);
   #|   document.removeEventListener("contextmenu", listeners.onContextMenu);
+  #|   listeners.discardTemporaryFocus();
   #| }
 
 ///|
@@ -242,16 +302,16 @@ fn context_menu_subscription(emit : @cmd.Emit[ContextMsg]) -> @sub.Sub {
     let mut emit = emit
     let listeners = install_context_menu_listener(
       () => scheduler.add(emit(CloseContext)),
-      (kind, value, detail, has_selection, selected_text, x, y) => {
-        scheduler.add(
-          emit(
-            Requested(
-              context_request(kind, value, detail, has_selection, selected_text),
-              x,
-              y,
-            ),
-          ),
-        )
+      (target, selected_text, restore_focus, x, y) => {
+        match
+          (
+            context_request(target, selected_text),
+            optional_context_string(restore_focus),
+          ) {
+          (Some(request), Ok(restore_focus_id)) =>
+            scheduler.add(emit(Requested(request, x, y, restore_focus_id)))
+          _ => ()
+        }
       },
     )
     Some({
@@ -307,16 +367,33 @@ fn context_definition(
   match request.target {
     NoTarget => ()
     WebLink(url) => {
-      let label = if input.platform is Web { "Open in New Tab" } else { "Open" }
-      navigation.push(
-        context_item(
-          label,
-          label,
-          @icons.icon_link_external(),
-          (actions.open_link)(url),
-        ),
-      )
-      if !(input.platform is Web) {
+      if input.platform is Web {
+        navigation.push(
+          context_item(
+            "Open in New Tab",
+            "Open in New Tab",
+            @icons.icon_link_external(),
+            (actions.open_link)(url),
+          ),
+        )
+      } else if input.open_web_links_in_app {
+        navigation.push(
+          context_item(
+            "Open",
+            "Open",
+            @icons.icon_link_external(),
+            (actions.open_link)(url),
+          ),
+        )
+        navigation.push(
+          context_item(
+            "Open in Default Browser",
+            "Open in the system default browser",
+            @icons.icon_link_external(),
+            (actions.open_external_link)(url),
+          ),
+        )
+      } else {
         navigation.push(
           context_item(
             "Open in Default Browser",
@@ -399,17 +476,12 @@ pub fn context_component(
     init=(_, _) => ({ open_context: None, }, @cmd.none),
     update=(_state, input, msg, _) => {
       match msg {
-        Requested(request, x, y) => {
+        Requested(request, x, y, restore_focus_id) => {
           guard context_definition(input, request, actions) is Some(definition) &&
             definition.enabled_indices() is [_, ..] else {
             return ({ open_context: None, }, @cmd.none)
           }
-          let open : ContextOpen = {
-            request,
-            x,
-            y,
-            restore_focus_id: focused_element_id(),
-          }
+          let open : ContextOpen = { request, x, y, restore_focus_id, }
           (
             { open_context: Some(open), },
             @cmd.batch([

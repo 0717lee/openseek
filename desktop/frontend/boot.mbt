@@ -113,8 +113,12 @@ fn Model::context_menu_input(self : Model) -> @action_menu.ContextInput {
   // through the existing host-addressed file-link route.
   let reveal_files = self.is_desktop &&
     self.active_checkout() is Some(active) &&
-    active.owner.channel is Local
-  { platform, reveal_files, }
+    active.owner.channel is Local &&
+    active.placement is Some(placement) &&
+    placement.checkout_root() is Some(_)
+  let open_web_links_in_app = self.is_desktop &&
+    (self.screen is Chat || self.screen is Codex)
+  { platform, open_web_links_in_app, reveal_files, }
 }
 
 ///|

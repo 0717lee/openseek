@@ -51,6 +51,9 @@ priv enum Msg {
 const OpenEvent : String = "openseek-action-menu-open"
 
 ///|
+const TemporaryFocusAttribute : String = "data-action-menu-temporary-focus"
+
+///|
 fn menu_id(target : String) -> String {
   target + ":actions"
 }
@@ -192,6 +195,10 @@ fn focus_element(id : String, after_render : Bool) -> @cmd.Cmd {
         "focus",
         ([] : Array[@js.Value]),
       )
+      if element.get_attribute(TemporaryFocusAttribute) == Some(id) {
+        element.remove_attribute(TemporaryFocusAttribute)
+        element.remove_attribute("id")
+      }
     }
   }
   if after_render {

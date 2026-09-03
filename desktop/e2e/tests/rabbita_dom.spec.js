@@ -738,8 +738,22 @@ test('transcript Markdown keeps links safe and loads local raster bytes through 
   const external = markdown.getByRole('link', { name: 'External docs' });
   await expect(external).toHaveAttribute('target', '_blank');
   await expect(external).toHaveAttribute('rel', 'noopener noreferrer');
-  await external.click({ button: 'right' });
+  await external.focus();
+  await external.evaluate(element => {
+    element.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 0,
+      clientY: 0,
+    }));
+  });
   let contextMenu = page.getByRole('menu', { name: 'Context menu' });
+  await expect(contextMenu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(external).toBeFocused();
+
+  await external.click({ button: 'right' });
+  contextMenu = page.getByRole('menu', { name: 'Context menu' });
   await expect(contextMenu.getByRole('menuitem')).toHaveText([
     'Open in New Tab',
     'Copy Link',

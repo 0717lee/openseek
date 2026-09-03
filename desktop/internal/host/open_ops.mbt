@@ -157,7 +157,11 @@ async fn reveal_path_op(payload : OpenPathPayload) -> RevealPathReply {
 async test "reveal_path shares open_path reference refusals" {
   let root = @fs.tmpdir(prefix="openseek-host-reveal-missing-")
   let missing = "\{root}/missing.mbt:12"
-  let reply = reveal_path_op({ session: "", cwd: None, path: missing, })
+  let reply = reveal_path_op({
+    session: "unused-for-absolute-path",
+    cwd: None,
+    path: missing,
+  })
   assert_eq(reply, RevealRefused("File does not exist: \{root}/missing.mbt"))
 }
 
