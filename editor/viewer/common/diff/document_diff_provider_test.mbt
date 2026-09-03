@@ -57,10 +57,10 @@ test "line provider keeps EOF inner changes inside their line hunks" {
     (
       after,
       before,
-      @base_common.LineRange(2, 4),
-      @base_common.LineRange(2, 2),
-      @base_common.Range(2, 1, 4, 1),
-      @base_common.Range(2, 1, 2, 1),
+      LineRange(2, 4),
+      LineRange(2, 2),
+      Range(2, 1, 4, 1),
+      Range(2, 1, 2, 1),
     ),
   ]
   let provider = @diff.LineDocumentDiffProvider()
