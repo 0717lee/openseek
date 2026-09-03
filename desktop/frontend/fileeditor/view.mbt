@@ -595,15 +595,6 @@ fn tree_pane(dispatch : @cmd.Emit[Msg], state : State, ctx : Ctx) -> @html.Html 
           ),
         ],
       ),
-      @html.button(
-        class="explorer-close-all",
-        title="Close all file tabs",
-        attrs=@html.Attrs::build()
-          .aria_label("Close all file tabs")
-          .disabled(ctx.open_files.is_empty())
-          .on_click(_ => dispatch(CloseAllFiles)),
-        @icons.icon(@icons.icon_close_all),
-      ),
     ]),
     @html.div(
       class=if state.explorer_mode is ExplorerSearch {

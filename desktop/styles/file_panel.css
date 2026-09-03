@@ -348,7 +348,7 @@ html.is-resizing * {
 .editor-tabsbar {
   position: relative;
 }
-.tab-add {
+.tab-action {
   flex: 0 0 auto;
   display: grid;
   place-items: center;
@@ -361,9 +361,13 @@ html.is-resizing * {
   color: var(--color-text-secondary);
   cursor: pointer;
 }
-.tab-add:hover {
+.tab-action:hover:not(:disabled) {
   background: var(--color-accent-soft);
   color: var(--color-accent-strong);
+}
+.tab-action:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .tab-add.hidden {
   display: none;
@@ -941,30 +945,6 @@ html.is-resizing * {
 .explorer-tab.active {
   color: var(--color-accent-strong);
   background: var(--color-accent-soft);
-}
-
-.explorer-close-all {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-xs);
-  color: var(--color-text-secondary);
-  background: transparent;
-  cursor: pointer;
-}
-
-.explorer-close-all:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  background: var(--color-bg-subtle);
-}
-
-.explorer-close-all:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 
 .explorer-count {
