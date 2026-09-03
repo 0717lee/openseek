@@ -23,8 +23,6 @@ pub fn BrowserViews::window_ready(
   window : @proton.WindowHandle,
 ) -> Unit {
   self.window = Some(window)
-  let dark = (window.state().theme == "dark") catch { _ => false }
-  let _ = @platform.set_titlebar_dark_mode(dark)
 }
 
 ///|
@@ -104,7 +102,6 @@ priv suberror BrowserViewError {
   WindowNotReady
   UnknownView(Int)
   BlockedURL(String)
-  TitlebarThemeUnavailable
 } derive(Debug)
 
 ///|
@@ -113,8 +110,6 @@ impl Show for BrowserViewError with fn output(self, logger) {
     WindowNotReady => logger.write_string("The desktop window is not ready")
     UnknownView(id) => logger.write_string("Unknown browser view \{id}")
     BlockedURL(url) => logger.write_string("Blocked non-web page URL: \{url}")
-    TitlebarThemeUnavailable =>
-      logger.write_string("The Windows titlebar theme could not be applied")
   }
 }
 
@@ -300,9 +295,9 @@ fn BrowserViews::set_app_titlebar_theme(
   self : BrowserViews,
   payload : @protocol.AppTitlebarThemePayload,
 ) -> @protocol.EmptyReply raise {
-  let _ = self.attached_window()
-  guard @platform.set_titlebar_dark_mode(payload.dark) else {
-    raise TitlebarThemeUnavailable
+  let window = self.attached_window()
+  if @sys.win32 || @sys.win64 || @sys.apple_os_mac {
+    window.set_theme(if payload.dark { Dark } else { Light })
   }
   Acknowledged
 }

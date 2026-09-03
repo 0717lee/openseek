@@ -10,8 +10,6 @@ pub async fn open_path(String) -> Int
 
 pub async fn open_url(String) -> Int
 
-pub fn set_titlebar_dark_mode(Bool) -> Bool
-
 // Errors
 
 // Types and methods
