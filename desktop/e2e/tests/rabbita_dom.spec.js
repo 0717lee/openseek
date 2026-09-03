@@ -987,10 +987,9 @@ test('sidebar menu dismissal and pending selection follow the clicked row', asyn
   const rowSpinner = second.locator('.conversation-load-spinner');
   const panelSpinner = page.locator('.conversation-load-state-spinner');
   await expect(rowSpinner).toHaveCSS('animation-name', 'conversation-load-spin');
-  await expect(panelSpinner).toHaveCSS('animation-name', 'conversation-load-spin');
+  await expect(panelSpinner).toHaveCount(0);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(rowSpinner).toHaveCSS('animation-name', 'none');
-  await expect(panelSpinner).toHaveCSS('animation-name', 'none');
   await expect(page.getByText('Browser result', { exact: true })).toHaveCount(0);
   await expect.poll(() => app.requests.some(request =>
     request.method === 'session.load' && request.params?.session === 'session-2'))
