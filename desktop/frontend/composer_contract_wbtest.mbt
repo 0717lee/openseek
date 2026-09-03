@@ -129,56 +129,12 @@ test "annotation-only composer submission starts its conversation" {
 }
 
 ///|
-test "archive cursor separates transferred actions from a reopened id" {
-  let archived : @interop.ConversationKey = {
-    channel: @interop.ChannelId::Local,
-    session: "desktop-test",
-  }
-  let fresh : @interop.ConversationKey = {
-    channel: @interop.ChannelId::Local,
-    session: "archive-replacement",
-  }
-  let reopened = test_conversation()
-  let replacement = empty_conversation(
-    fresh.channel,
-    fresh.session,
-    fresh.channel.test_project(),
-  )
-  let model = {
-    ..test_model(),
-    conversations: [reopened, replacement],
-    composer_entry_retirements: [archived],
-    composer_entry_replacements: [{ archived, fresh, archive_generation: 1, }],
-  }
-  let old_identity : @composer.Identity = {
-    owner: archived,
-    archive_generation: 0,
-  }
-  let reopened_identity : @composer.Identity = {
-    owner: archived,
-    archive_generation: 1,
-  }
-  guard model.conversation_for_composer_action(old_identity) is Some(old) else {
-    fail("the old entry should follow its recorded replacement")
-  }
-  guard model.conversation_for_composer_action(reopened_identity) is Some(new) else {
-    fail("the reopened entry should resolve to the reused id")
-  }
-  inspect(old.session_id, content="archive-replacement")
-  inspect(new.session_id, content="desktop-test")
-}
-
-///|
 test "a background retirement expires old actions without poisoning a reopened id" {
   let owner : @interop.ConversationKey = {
     channel: @interop.ChannelId::Local,
     session: "desktop-test",
   }
-  let model = {
-    ..test_model(),
-    composer_entry_retirements: [owner],
-    composer_entry_replacements: [],
-  }
+  let model = { ..test_model(), composer_entry_retirements: [owner], }
   assert_true(
     model.conversation_for_composer_action({ owner, archive_generation: 0, })
     is None,

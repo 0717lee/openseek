@@ -102,13 +102,6 @@ fn Model::composer_input(self : Model) -> @composer.Input {
       }),
     )
   }
-  // Advice about the draft this composer is now holding, so it belongs to the
-  // composer. It stands until the user acts on it: whether the archived record
-  // got the prompt is a question only that record answers, and a toast would
-  // be gone before they could go and look.
-  if conv.archived_pending_input {
-    context.push(@composer.ArchivedInputNotice(text=ArchivedPendingInputNotice))
-  }
   let steering = conv.pending_steers.filter(input => {
     input.behavior is FollowupSteer
   })
@@ -198,7 +191,6 @@ fn Model::composer_input(self : Model) -> @composer.Input {
     installed_skills: self.installed_skills,
     context_generation: self.composer_context_generation,
     submission_sequence: self.submission_sequence,
-    replacements: self.composer_entry_replacements,
     retirements: self.composer_entry_retirements,
     file_candidates: self.file_search().candidates,
     open_files: self.live_editor_files(),
@@ -304,7 +296,6 @@ fn Model::dormant_composer_input(self : Model) -> @composer.Input {
     installed_skills: self.installed_skills,
     context_generation: self.composer_context_generation,
     submission_sequence: self.submission_sequence,
-    replacements: self.composer_entry_replacements,
     retirements: self.composer_entry_retirements,
     file_candidates: [],
     open_files: [],

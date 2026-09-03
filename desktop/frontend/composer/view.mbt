@@ -331,17 +331,6 @@ pub fn ContextComponent::render(
       }
       @html.div(class="codex-pending", rendered)
     }
-    ArchivedInputNotice(text~) =>
-      @html.div(class="composer-notice", [
-        @html.span(class="composer-notice-text", text),
-        @html.button(
-          class="composer-notice-btn",
-          type_="button",
-          title="Dismiss this notice",
-          on_click=action_emit(ArchivedInputDismissed(identity~)),
-          "Got it",
-        ),
-      ])
     PendingSteerPanel(items~) => {
       let rows : Array[@html.Html] = []
       for shown in items {

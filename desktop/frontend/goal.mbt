@@ -578,11 +578,8 @@ test "re-asserting a blocked goal waits for its own marker" {
 }
 
 ///|
-test "archiving carries the goal draft to the replacement" {
+test "archiving discards the goal draft with its conversation" {
   let dispatch = test_dispatch()
-  // The row's Archive can be clicked while goal mode holds unsent writing,
-  // and that writing exists nowhere else — the salvage that recovers the
-  // prompt draft has to recover this one too.
   let model = test_model()
     .replace_conversation({
       ..test_conversation(),
@@ -606,20 +603,13 @@ test "archiving carries the goal draft to the replacement" {
     model,
   )
   inspect(next.active_session, content="desktop-restored")
-  guard next.active().goal_edit is Some(edit) else {
-    fail("the goal draft should come across")
-  }
-  inspect(edit.draft, content="a goal still being written")
-  // And it stays out of the prompt: it is not something to send.
-  inspect(next.active().task, content="a prompt typed too")
+  assert_true(next.active().goal_edit is None)
+  inspect(next.active().task, content="")
 }
 
 ///|
-test "archiving carries a goal that was sent but never confirmed" {
+test "archiving discards a goal that was sent but never confirmed" {
   let dispatch = test_dispatch()
-  // A Set whose marker never came back is not the archived record's yet —
-  // nothing proves the record received it, so this is still the only copy,
-  // exactly like the initial prompts the same salvage recovers.
   let model = test_model()
     .replace_conversation({
       ..test_conversation(),
@@ -641,12 +631,8 @@ test "archiving carries a goal that was sent but never confirmed" {
     ),
     model,
   )
-  guard next.active().goal_edit is Some(edit) else {
-    fail("an unconfirmed goal should come across")
-  }
-  inspect(edit.draft, content="a goal still in flight")
-  // The command itself does not: it was issued against the archived session.
-  inspect(next.active().goal_pending is None, content="true")
+  assert_true(next.active().goal_edit is None)
+  assert_true(next.active().goal_pending is None)
 }
 
 ///|

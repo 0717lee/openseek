@@ -263,7 +263,6 @@ fn Entry::reconciled(self : Entry, input : Input) -> Entry {
 priv struct Model {
   entries : Array[Entry]
   applied_retirements : Int
-  applied_replacements : Int
   // The clock the running row's elapsed span is measured against, advanced by
   // `ClockTicked` and only while a turn is open. Component state rather than
   // the application's: a value that changes every second belongs to the one
@@ -277,7 +276,6 @@ fn Model::Model(input : Input) -> Model {
   {
     entries: [Entry(input)],
     applied_retirements: input.retirements.length(),
-    applied_replacements: input.replacements.length(),
     clock_ms: @interop.now_ms(),
   }
 }
@@ -307,34 +305,7 @@ fn Model::with_retirements_applied(self : Model, input : Input) -> Model {
 }
 
 ///|
-fn Model::with_replacements_applied(self : Model, input : Input) -> Model {
-  let mut entries = self.entries
-  for index in self.applied_replacements..<input.replacements.length() {
-    let replacement = input.replacements[index]
-    let snapshot = entries
-    for archived_entry in snapshot {
-      if archived_entry.owner == replacement.archived {
-        entries = entries.filter(existing => {
-          existing.owner != replacement.archived &&
-          existing.owner != replacement.fresh
-        })
-        entries.push({
-          ..archived_entry,
-          owner: replacement.fresh,
-          completion: None,
-          symbol_cache: SymbolCache(),
-          pending_submission: None,
-        })
-        break
-      }
-    }
-  }
-  { ..self, entries, applied_replacements: input.replacements.length(), }
-}
-
-///|
 fn Model::active(self : Model, input : Input) -> Entry {
-  let self = self.with_replacements_applied(input)
   for entry in self.entries {
     if entry.owner == input.identity.owner &&
       !self.owner_has_pending_retirement(input, entry.owner) {
@@ -364,7 +335,6 @@ priv enum Msg {
   CompletionAccept
   CompletionPick(Int)
   CompletionDismiss
-  EntriesTransferred
   EntriesRetired
   CompletionPump
   // A second passed while a turn was open. Carries nothing: the handler reads
@@ -611,9 +581,7 @@ fn Model::update(
   emit : @cmd.Emit[Msg],
   action_emit : @cmd.Emit[Action],
 ) -> (Model, @cmd.Cmd) {
-  let self = self
-    .with_replacements_applied(input)
-    .with_retirements_applied(input)
+  let self = self.with_retirements_applied(input)
   let entry = self.active(input)
   let self = self.with_entry(entry)
   match msg {
@@ -653,7 +621,7 @@ fn Model::update(
       let (next, command) = entry.accept_completion(item, action_emit)
       self.commit_entry_change(entry, next, command, action_emit)
     }
-    EntriesTransferred | EntriesRetired => (self, @cmd.none)
+    EntriesRetired => (self, @cmd.none)
     MentionRemoved(index) => {
       guard entry.draft.mentions.get(index) is Some(mention) else {
         return (self.with_entry(entry), @cmd.none)
@@ -874,9 +842,6 @@ fn Model::editing_subscriptions(
 ) -> @sub.Sub {
   if self.applied_retirements < input.retirements.length() {
     return @sub.every(150, emit(EntriesRetired))
-  }
-  if self.applied_replacements < input.replacements.length() {
-    return @sub.every(150, emit(EntriesTransferred))
   }
   let entry = self.active(input)
   guard entry.completion is Some(completion) && completion.menu.loading() else {
