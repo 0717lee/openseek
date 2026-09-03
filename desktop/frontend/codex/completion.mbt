@@ -378,7 +378,6 @@ pub fn State::composer_input(
     installed_skills: self.installed_codex_skills(),
     context_generation: 0,
     submission_sequence: self.submission_sequence,
-    replacements: [],
     retirements: [],
     file_candidates: context.file_candidates,
     open_files: context.open_files,
@@ -518,7 +517,6 @@ fn State::apply_composer_action(
     | @composer.SelectMenuDismissed(..)
     | @composer.ApprovalAnswered(..)
     | @composer.ApiSetupRequested(..)
-    | @composer.ArchivedInputDismissed(..)
     | @composer.QueuedInputEditRequested(..)
     | @composer.QueuedInputSteerRequested(..)
     | @composer.QueuedInputDeleteRequested(..)

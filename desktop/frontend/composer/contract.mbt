@@ -16,19 +16,9 @@ pub(all) struct Draft {
 ///|
 /// The conversation owner plus the archive-fact cursor at which its local
 /// composer entry was created. Every conversation-scoped action carries this
-/// identity so the root can reject or redirect a command after navigation or
-/// archive changes.
+/// identity so the root can reject a stale command after archive changes.
 pub(all) struct Identity {
   owner : @interop.ConversationKey
-  archive_generation : Int
-} derive(Eq, @debug.Debug)
-
-///|
-/// One active archive rotation. The root appends these facts; the composer
-/// consumes their ordered tail to move a cached draft to the fresh owner.
-pub(all) struct Replacement {
-  archived : @interop.ConversationKey
-  fresh : @interop.ConversationKey
   archive_generation : Int
 } derive(Eq, @debug.Debug)
 
@@ -130,7 +120,6 @@ pub(all) enum ContextComponent {
   ApiSetupNotice(text~ : String)
   ApprovalRequest(ApprovalNotice)
   CodexRequests(requests~ : Array[CodexRequestInput])
-  ArchivedInputNotice(text~ : String)
   PendingSteerPanel(items~ : Array[String])
   QueuedInputPanel(items~ : Array[QueuedInput])
   CompactionNotice(queued~ : Bool)
@@ -224,7 +213,6 @@ pub(all) struct Input {
   installed_skills : Array[@skills.InstalledItem]
   context_generation : Int
   submission_sequence : Int
-  replacements : Array[Replacement]
   retirements : Array[@interop.ConversationKey]
   file_candidates : Array[@pathx.Relative]
   open_files : Array[@pathx.Relative]
@@ -278,7 +266,6 @@ pub(all) enum Action {
   GitDetailsToggled(identity~ : Identity)
   WorktreeModeToggled(identity~ : Identity)
   ApiSetupRequested(identity~ : Identity)
-  ArchivedInputDismissed(identity~ : Identity)
   QueuedInputEditRequested(identity~ : Identity, id~ : String)
   QueuedInputSteerRequested(identity~ : Identity, id~ : String)
   QueuedInputDeleteRequested(identity~ : Identity, id~ : String)
@@ -317,7 +304,6 @@ pub fn Action::identity(self : Action) -> Identity {
     | GitDetailsToggled(identity~)
     | WorktreeModeToggled(identity~)
     | ApiSetupRequested(identity~)
-    | ArchivedInputDismissed(identity~)
     | QueuedInputEditRequested(identity~, ..)
     | QueuedInputSteerRequested(identity~, ..)
     | QueuedInputDeleteRequested(identity~, ..)
@@ -408,12 +394,6 @@ pub extend RunningSubmit with Debug::{to_repr}
 
 ///|
 pub extend RunningSubmit with Eq::{equal, not_equal}
-
-///|
-pub extend Replacement with Debug::{to_repr}
-
-///|
-pub extend Replacement with Eq::{equal, not_equal}
 
 ///|
 pub extend RunHeartbeat with Debug::{to_repr}

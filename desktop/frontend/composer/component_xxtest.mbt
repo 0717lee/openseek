@@ -14,7 +14,6 @@ fn Input::fixture(task : String) -> Input {
     installed_skills: [],
     context_generation: 0,
     submission_sequence: 0,
-    replacements: [],
     retirements: [],
     file_candidates: [],
     open_files: [],
@@ -121,50 +120,6 @@ test "background retirement prevents an old draft from reviving" {
     Action::test_emit(),
   )
   inspect(without_old.active(retired).draft.task, content="")
-}
-
-///|
-test "queued archive replacements preserve every draft handoff" {
-  let input = Input::fixture("")
-  let (drafted, _) = Model(input).update(
-    input,
-    TextChanged("draft through two rotations"),
-    Msg::test_emit(),
-    Action::test_emit(),
-  )
-  let first_fresh : @interop.ConversationKey = {
-    channel: @interop.ChannelId::Local,
-    session: "composer-fresh-one",
-  }
-  let second_fresh : @interop.ConversationKey = {
-    channel: @interop.ChannelId::Local,
-    session: "composer-fresh-two",
-  }
-  let rotated = {
-    ..input,
-    identity: { owner: second_fresh, archive_generation: 2, },
-    replacements: [
-      {
-        archived: input.identity.owner,
-        fresh: first_fresh,
-        archive_generation: 1,
-      },
-      { archived: first_fresh, fresh: second_fresh, archive_generation: 2, },
-    ],
-    retirements: [input.identity.owner, first_fresh],
-  }
-  let (moved, _) = drafted.update(
-    rotated,
-    EntriesTransferred,
-    Msg::test_emit(),
-    Action::test_emit(),
-  )
-  let entry = moved.active(rotated)
-  inspect(entry.draft.task, content="draft through two rotations")
-  assert_true(entry.owner == second_fresh)
-  // The moved draft keeps the generation at which it was authored. The root
-  // follows later archive facts from that cursor to resolve queued actions.
-  inspect(entry.identity().archive_generation, content="0")
 }
 
 ///|

@@ -2,9 +2,6 @@
 const TranscriptReloadMaxAttempts : Int = 3
 
 ///|
-const ArchivedPendingInputNotice : String = "This conversation was archived while a prompt was being sent. The input was restored here; check the archived transcript before resubmitting."
-
-///|
 /// Build the request for one transcript generation. Foreground loads may
 /// activate a selected stored session; background refreshes only reconcile
 /// the conversation already in the model.
@@ -1569,9 +1566,10 @@ fn sync_browser_view(
 
 ///|
 /// Replace a selected record that disappeared while it was active or loading,
-/// carrying only its resubmittable composer state into the supplied fresh id.
-/// List replies and identity notifications share this transition because either
-/// can win their delivery race.
+/// returning to an existing New chat draft or the supplied fresh id. The
+/// removed record's composer state ends with it. List replies and identity
+/// notifications share this transition because either can win their delivery
+/// race.
 fn replace_removed_selection(
   model : Model,
   channel : @interop.ChannelId,
@@ -1591,73 +1589,47 @@ fn replace_removed_selection(
       conv.project() == workspace &&
       conv.is_archived_read_only() == (record is ArchivedRecord)
     })
-    is Some(removed_conv) else {
+    is Some(_) else {
     return model
   }
-  let salvaged = removed_conv.archive_salvage()
-  let restored_task = salvaged.task
-  let restored_mentions = salvaged.mentions
-  let pending_initial = salvaged.pending_initial
   let conversations = model.conversations.filter(conv => {
     conv.device != channel ||
     conv.session_id != session ||
     conv.project() != workspace ||
     conv.is_archived_read_only() != (record is ArchivedRecord)
   })
-  let activated = { ..model, conversations, }.activate(
-    channel, fresh_session, workspace,
-  )
-  // `activate` just placed `fresh_session`, so it is the one on screen.
-  guard activated.active_conversation() is Some(fresh) else { return model }
-  let task = if fresh.task.is_empty() {
-    restored_task
-  } else if restored_task.is_empty() || fresh.task == restored_task {
-    fresh.task
-  } else {
-    restored_task + "\n\n" + fresh.task
+  let fallback = conversations
+    .rev_iter()
+    .find_first(conv => {
+      conv.device == channel &&
+      conv.project() == workspace &&
+      model.conversation_is_new_chat(conv) &&
+      conv.worth_keeping()
+    })
+  let fallback_session = match fallback {
+    Some(draft) => draft.session_id
+    None => fresh_session
   }
-  let mentions = restored_mentions
-  for mention in fresh.mentions {
-    mentions.push(mention)
+  let activated = { ..model, conversations, }
+    .activate(channel, fallback_session, workspace)
+    .with_active_project(Some(workspace))
+  let activated = match fallback {
+    Some(_) => activated
+    None =>
+      match activated.active_conversation() {
+        Some(fresh) =>
+          activated.replace_conversation({
+            ..fresh,
+            worktree_mode: model.default_worktree_mode(channel, workspace),
+          })
+        None => activated
+      }
   }
-  // Goal mode comes across with its text: the replacement conversation is
-  // where the user goes on writing it.
-  let goal_edit = match (salvaged.goal_draft, fresh.goal_edit) {
-    (Some(draft), None) => Some({ draft, })
-    (_, existing) => existing
-  }
-  let fresh = {
-    ..fresh,
-    task,
-    mentions,
-    // The component still owns the text, but this bit keeps the replacement
-    // reachable until that local entry is submitted or cleared.
-    composer_draft_present: removed_conv.composer_draft_present ||
-    fresh.composer_draft_present,
-    workspace: Project(root=workspace),
-    worktree_mode: model.default_worktree_mode(channel, workspace),
-    goal_edit,
-  }
-  let fresh = { ..fresh, archived_pending_input: pending_initial, }
-  let composer_entry_replacements = model.composer_entry_replacements.copy()
-  let archived_owner : @interop.ConversationKey = { channel, session, }
-  let mut archive_generation = 0
-  for index, retired in model.composer_entry_retirements {
-    if retired == archived_owner {
-      archive_generation = index + 1
-    }
-  }
-  composer_entry_replacements.push({
-    archived: archived_owner,
-    fresh: { channel, session: fresh_session, },
-    archive_generation,
-  })
   {
-    ..activated.replace_conversation(fresh).with_active_project(Some(workspace)),
+    ..activated,
     screen: Chat,
     loading_conversation: None,
     conversation_load_failure: None,
-    composer_entry_replacements,
   }
 }
 
@@ -2092,7 +2064,6 @@ fn update_msg(
         | @composer.GitDetailsToggled(..)
         | @composer.WorktreeModeToggled(..)
         | @composer.ApiSetupRequested(..)
-        | @composer.ArchivedInputDismissed(..)
         | @composer.QueuedInputEditRequested(..)
         | @composer.QueuedInputSteerRequested(..)
         | @composer.QueuedInputDeleteRequested(..)
@@ -2129,8 +2100,6 @@ fn update_msg(
               update_msg(dispatch, ToggleWorktreeMode, model)
             @composer.ApiSetupRequested(..) =>
               update_msg(dispatch, OpenApiSetup, model)
-            @composer.ArchivedInputDismissed(..) =>
-              update_msg(dispatch, DismissArchivedPendingInput, model)
             @composer.QueuedInputEditRequested(id~, ..) => {
               guard conv.run is Open(stage~, ..) &&
                 !(stage is Cancelling) &&
@@ -3050,15 +3019,6 @@ fn update_msg(
         @cmd.none,
         { ..model, notifications: model.notifications.filter(t => t.id != id), },
       )
-    DismissArchivedPendingInput =>
-      if model.active_conversation() is Some(conv) {
-        (
-          @cmd.none,
-          model.replace_conversation({ ..conv, archived_pending_input: false, }),
-        )
-      } else {
-        (@cmd.none, model)
-      }
     RemoteStatusLoaded(status) =>
       (@cmd.none, { ..model, remote_access: Some(status), })
     RemoteConnectClicked =>
@@ -14986,7 +14946,7 @@ test "archived deletion keeps same-id rows in other stores" {
   )
   assert_true(deleted.dev().archived == [unplaced])
   inspect(deleted.active_session, content="desktop-fresh")
-  inspect(deleted.active().task, content="project draft")
+  inspect(deleted.active().task, content="")
 }
 
 ///|
@@ -15036,7 +14996,7 @@ test "delete response tombstones a family before stale list replies" {
   inspect(deleted.active_session, content="desktop-fresh")
   assert_eq(same_input.active_session, deleted.active_session)
   assert_eq(same_input.active().task, deleted.active().task)
-  inspect(deleted.active().task, content="keep local draft")
+  inspect(deleted.active().task, content="")
   assert_eq(deleted.dev().archived.length(), 1)
   assert_eq(deleted.dev().archived[0].id, "desktop-other")
   assert_false(deleted.dev().sessions.contains(parent))
@@ -15228,7 +15188,7 @@ test "deleted broadcast is immediate and idempotent" {
   inspect(deleted.active_session, content="desktop-fresh")
   assert_eq(same_input.active_session, deleted.active_session)
   assert_eq(same_input.active().task, deleted.active().task)
-  inspect(deleted.active().task, content="carry this draft")
+  inspect(deleted.active().task, content="")
   assert_true(
     deleted.find_conversation(@interop.ChannelId::Local, "desktop-gone") is None,
   )
@@ -15277,7 +15237,7 @@ test "deleted broadcast rotates the active conversation's exact store" {
     model,
   )
   inspect(deleted.active_session, content="desktop-fresh")
-  inspect(deleted.active().task, content="project draft")
+  inspect(deleted.active().task, content="")
   assert_true(deleted.dev().sessions == [unplaced])
   assert_true(deleted.dev().archived.is_empty())
 }
@@ -15320,14 +15280,14 @@ test "archive facts rotate the open conversation's exact store" {
     model,
   )
   inspect(notified.active_session, content="notification-fresh")
-  inspect(notified.active().task, content="project draft")
+  inspect(notified.active().task, content="")
   assert_true(
     notified.find_conversation(@interop.ChannelId::Local, "shared") is None,
   )
   assert_true(notified.dev().sessions == [unplaced])
   let (_, listed) = update(dispatch, archived_loaded([project_item]), model)
   inspect(listed.active_session, content="desktop-archive-replacement")
-  inspect(listed.active().task, content="project draft")
+  inspect(listed.active().task, content="")
   assert_true(
     listed.find_conversation(@interop.ChannelId::Local, "shared") is None,
   )
@@ -15378,11 +15338,8 @@ test "archive broadcast invalidates the active send target before list replies" 
   assert_eq(invalidated.dev().active_project, Some(workspace))
   assert_eq(invalidated.active().workspace, Project(root=workspace))
   assert_true(invalidated.active().worktree_mode)
-  inspect(invalidated.active().task, content="must not target archived session")
-  inspect(invalidated.active().mentions.length(), content="1")
-  assert_true(
-    invalidated.active().mentions[0].ref_ is Skill(name="draft-skill"),
-  )
+  inspect(invalidated.active().task, content="")
+  assert_true(invalidated.active().mentions.is_empty())
   assert_true(
     invalidated.dev().archived.iter().any(item => item.id == "desktop-test"),
   )
@@ -15405,7 +15362,7 @@ test "archive broadcast invalidates the active send target before list replies" 
 }
 
 ///|
-test "an archive response arriving before its notification preserves the draft once" {
+test "an archive response arriving before its notification discards the draft once" {
   let dispatch = test_dispatch()
   let model = test_model()
     .replace_conversation({ ..test_conversation(), task: "keep this draft", })
@@ -15419,7 +15376,7 @@ test "an archive response arriving before its notification preserves the draft o
     model,
   )
   inspect(responded.active_session, content="desktop-archive-replacement")
-  inspect(responded.active().task, content="keep this draft")
+  inspect(responded.active().task, content="")
   let (_, notified) = update_dev(
     dispatch,
     SessionsChanged(
@@ -15433,13 +15390,13 @@ test "an archive response arriving before its notification preserves the draft o
     responded,
   )
   // The late duplicate only refreshes the tombstone; it cannot rotate the
-  // already-safe composer a second time or lose its recovered text.
+  // fallback composer a second time.
   inspect(notified.active_session, content="desktop-archive-replacement")
-  inspect(notified.active().task, content="keep this draft")
+  inspect(notified.active().task, content="")
 }
 
 ///|
-test "archiving a pending start restores its original composer without ownership" {
+test "archiving a pending start discards its composer without ownership" {
   let dispatch = test_dispatch()
   let sent_mention : Mention = { ref_: Skill(name="sent-skill"), range: None, }
   let newer_mention : Mention = {
@@ -15478,15 +15435,10 @@ test "archiving a pending start restores its original composer without ownership
     model,
   )
   inspect(next.active_session, content="desktop-restored")
-  inspect(next.active().task, content="original draft\n\ntyped afterward")
-  inspect(next.active().mentions.length(), content="2")
+  inspect(next.active().task, content="")
+  assert_true(next.active().mentions.is_empty())
   assert_true(next.active().run is NoRun(ended=None))
   inspect(next.active().pending_steers.length(), content="0")
-  // The advice is about the draft the composer is now holding, so it stands
-  // there until acknowledged rather than expiring as a toast.
-  assert_true(next.active().archived_pending_input)
-  let (_, acknowledged) = update(dispatch, DismissArchivedPendingInput, next)
-  assert_false(acknowledged.active().archived_pending_input)
 }
 
 ///|

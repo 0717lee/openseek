@@ -850,6 +850,33 @@ test('new chat, archive, and restore update the conversation sidebar', async ({ 
   expect(app.pageErrors).toEqual([]);
 });
 
+test('archiving a selected chat reuses an existing New chat draft', async ({ page }) => {
+  const app = new DesktopBrowserHarness(page);
+  await app.install();
+  await app.goto();
+
+  await page.locator('.workspace-row', { hasText: 'workspace' }).hover();
+  await page.getByTitle('New conversation in this project').click();
+  const newChat = page.locator('.conversation-row', { hasText: 'New chat' });
+  await expect(newChat).toHaveCount(1);
+  await page.locator('#task').fill('Keep this draft');
+
+  const stored = page.locator('.conversation-row[title="session-1"]');
+  await stored.click();
+  await expect(page.getByText('Browser result', { exact: true })).toBeVisible();
+  await page.locator('#task').fill('Discard this archived draft');
+  await stored.click({ button: 'right', position: { x: 18, y: 18 } });
+  await page.getByRole('menuitem', { name: 'Archive' }).click();
+
+  await expect.poll(() => app.requests.some(request =>
+    request.method === 'session.archive' &&
+    request.params?.session === 'session-1')).toBe(true);
+  await expect(newChat).toHaveCount(1);
+  await expect(newChat).toHaveClass(/active/);
+  await expect(page.locator('#task')).toHaveValue('Keep this draft');
+  expect(app.pageErrors).toEqual([]);
+});
+
 test('shared WebView action menu supports context position, keyboard, and rename', async ({ page }) => {
   const app = new DesktopBrowserHarness(page);
   app.workspaces.push('/other');

@@ -889,11 +889,6 @@ priv struct Conversation {
   // Where the durable transcript stands relative to the store; see
   // `TranscriptSync`.
   sync : TranscriptSync
-  // This conversation replaced one archived while a prompt was in flight. The
-  // composer says so, because what it is advice about is the draft the
-  // composer is now holding — the prompt may or may not have reached the
-  // archived record, and only that record can say.
-  archived_pending_input : Bool
   // The standing goal mirrored from the durable record's `[goal]` markers:
   // seeded by each snapshot's reduction and folded forward by marker
   // commits in `apply_commit`. Nothing local writes it — goal mode only
@@ -1286,12 +1281,6 @@ fn empty_device_state(channel : @interop.ChannelId) -> DeviceState {
 }
 
 ///|
-/// One active conversation replaced after it was archived. The root records
-/// every identity handoff so the composer can move all local entries that
-/// accumulate before its next subscription tick.
-type ComposerEntryReplacement = @composer.Replacement
-
-///|
 /// The owner key plus the archive-fact cursor at which its component entry
 /// was created. A reused session id can therefore name a new entry without
 /// intercepting commands that were already queued by the archived entry.
@@ -1543,10 +1532,6 @@ priv struct Model {
   // Transient presentation for the visible custom select. It closes on
   // context changes, selection, and click-away dismissal.
   select_menu : SelectMenu?
-  // Every archive rotation appends its identity handoff. Component-local draft
-  // text remains in the component; this ordered page-lifetime log keeps two
-  // rotations between subscription ticks from overwriting each other.
-  composer_entry_replacements : Array[ComposerEntryReplacement]
   // Every newly observed archive appends its exact owner. The composer consumes
   // this page-lifetime log in order, so a background session cannot regain an
   // old component-local draft when the same session id is later unarchived.
@@ -1787,9 +1772,6 @@ priv enum Msg {
   NotificationExpired(Int)
   // A toast was clicked: dismiss it now.
   DismissNotification(Int)
-  // The active conversation's "archived while a prompt was in flight" advice
-  // was acknowledged.
-  DismissArchivedPendingInput
   // The Settings "Check for updates" button.
   CheckForUpdates
   // An `auth.status` reply or `auth.changed` broadcast: the host's relay
@@ -2511,7 +2493,6 @@ fn empty_conversation(
     messages: [],
     watermark: 0,
     sync: Synced,
-    archived_pending_input: false,
     goal: None,
     goal_edit: None,
     goal_pending: None,
@@ -2631,7 +2612,6 @@ fn initial_model() -> Model {
     installed_skills: [],
     composer_context_generation: 0,
     select_menu: None,
-    composer_entry_replacements: [],
     composer_entry_retirements: [],
     quick_open: @quick_open.State::empty(),
     git_request_generation: 0,
@@ -3326,32 +3306,17 @@ fn Model::conversation_selection(self : Model) -> ConversationSelection? {
 
 ///|
 /// Resolve a component action against the conversation that currently owns
-/// its local entry. A command queued just before archive replacement still
-/// names the archived owner, so that one identity maps to the fresh record.
+/// its local entry. An archive fact newer than the entry expires the action;
+/// it must not reach either the archived record or a later reused id.
 fn Model::conversation_for_composer_action(
   self : Model,
   identity : ComposerActionIdentity,
 ) -> Conversation? {
-  let mut owner = identity.owner
-  // Follow only archive facts appended after this entry was born. An active
-  // archive has an exact handoff for its fact; a background archive has none,
-  // so its old actions expire instead of reaching a later unarchived record.
+  let owner = identity.owner
   for
     index in identity.archive_generation..<self.composer_entry_retirements.length() {
     if self.composer_entry_retirements[index] == owner {
-      let archive_generation = index + 1
-      let mut transferred = false
-      for replacement in self.composer_entry_replacements {
-        if replacement.archived == owner &&
-          replacement.archive_generation == archive_generation {
-          owner = replacement.fresh
-          transferred = true
-          break
-        }
-      }
-      if !transferred {
-        return None
-      }
+      return None
     }
   }
   self.find_conversation(owner.channel, owner.session)
@@ -3364,12 +3329,18 @@ fn Model::conversation_for_composer_action(
 /// the first send.
 fn Model::composing_new_chat(self : Model) -> Bool {
   guard self.active_conversation() is Some(conv) else { return false }
-  if conv.has_begun() {
+  self.conversation_is_new_chat(conv)
+}
+
+///|
+/// Whether `conv` is a live conversation the store does not know yet.
+fn Model::conversation_is_new_chat(self : Model, conv : Conversation) -> Bool {
+  if conv.has_begun() || conv.is_archived_read_only() {
     return false
   }
-  guard self.focused_device() is Some(dev) else { return true }
+  guard self.device_state(conv.device) is Some(dev) else { return true }
   for item in dev.sessions {
-    if item.id == conv.session_id {
+    if item.id == conv.session_id && item.workspace == conv.project() {
       return false
     }
   }
@@ -3879,59 +3850,6 @@ fn Conversation::restore_submission(
     mentions.push(mention)
   }
   { ..self, task, mentions, }
-}
-
-///|
-/// Recover everything the user can still resubmit when this conversation is
-/// archived out from under the composer. A prompt still in flight comes first
-/// in send order, followed by text typed since; no run or receipt state
-/// crosses into the replacement conversation.
-fn Conversation::archive_salvage(self : Conversation) -> ArchiveSalvage {
-  let drafts : Array[String] = []
-  let mentions : Array[Mention] = []
-  let pending_initial = self.pending_prompt is Some(_)
-  if self.pending_prompt is Some(pending) {
-    if !pending.draft.is_blank() {
-      drafts.push(pending.draft)
-    }
-    for mention in pending.mentions {
-      mentions.push(mention)
-    }
-  }
-  if !self.task.is_blank() {
-    drafts.push(self.task)
-  }
-  for mention in self.mentions {
-    mentions.push(mention)
-  }
-  // The goal draft rides beside the prompt rather than inside it: it is not
-  // something to send, and folding it into `task` would turn writing meant
-  // for the goal row into a prompt.
-  //
-  // Unsent writing comes first, and behind it a Set still waiting on its
-  // marker: sent, but with no proof it landed, which puts its text in exactly
-  // the position of the unconfirmed initial prompts above — the record may
-  // never have received it, and this is the only other copy. A Clearing asks
-  // for nothing to stand, so it carries nothing. Neither does a goal the
-  // record has already confirmed: that one is the archived record's.
-  let goal_draft = if self.goal_edit is Some(edit) && !edit.draft.is_blank() {
-    Some(edit.draft)
-  } else if self.goal_pending is Some({ request: Setting(text), .. }) &&
-    !text.is_blank() {
-    Some(text)
-  } else {
-    None
-  }
-  { task: drafts.join("\n\n"), mentions, goal_draft, pending_initial, }
-}
-
-///|
-/// What survives a conversation being archived out from under the composer.
-priv struct ArchiveSalvage {
-  task : String
-  mentions : Array[Mention]
-  goal_draft : String?
-  pending_initial : Bool
 }
 
 ///|
