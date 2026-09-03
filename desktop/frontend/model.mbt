@@ -2084,9 +2084,7 @@ priv enum DeviceMsg {
   SteerRejected(session~ : String, submission_id~ : String, run_id~ : String)
   QueueAccepted(
     session~ : String,
-    action~ : String,
-    id~ : String,
-    text~ : String?,
+    action~ : @protocol.QueueAction,
     run_id~ : String
   )
   QueueAddRejected(session~ : String, submission_id~ : String, run_id~ : String)

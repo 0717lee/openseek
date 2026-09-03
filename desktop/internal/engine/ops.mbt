@@ -465,63 +465,63 @@ pub fn queue_run(
   manager : EngineManager,
   payload : @protocol.QueuePayload,
 ) -> @protocol.QueueReply raise EngineError {
-  let id = payload.id.trim().to_owned()
-  guard !id.is_empty() else { return { accepted: false, run_id: None, } }
-  guard open_run_engine(manager, run_id?=payload.run_id) is Some(live) &&
-    live.phase is Running(run_id~, ..) else {
-    return { accepted: false, run_id: None, }
+  let id = match payload.action {
+    QueueAdd(id~, ..)
+    | QueueEdit(id~, ..)
+    | QueueWithdraw(id~)
+    | QueueSteer(id~) => id.trim().to_owned()
   }
-  if payload.run_id is Some(expected) && run_id != expected {
-    return { accepted: false, run_id: None, }
+  guard !id.is_empty() else { return { accepted: false, } }
+  guard open_run_engine(manager, run_id=payload.run_id) is Some(live) &&
+    live.phase is Running(run_id~, ..) else {
+    return { accepted: false, }
+  }
+  if run_id != payload.run_id {
+    return { accepted: false, }
   }
   match payload.action {
-    "add" => {
+    QueueAdd(text~, ..) => {
       guard !(live.phase is Running(compact_queued=true, ..)) else {
-        return { accepted: false, run_id: Some(run_id), }
+        return { accepted: false, }
       }
-      guard payload.text is Some(text) && !text.is_blank() else {
-        return { accepted: false, run_id: Some(run_id), }
-      }
+      guard !text.is_blank() else { return { accepted: false, } }
       guard !live.queued_runs.iter().any(queued => queued.id == id) else {
-        return { accepted: false, run_id: Some(run_id), }
+        return { accepted: false, }
       }
       live.queued_runs.push({ id, run_id: mint_run_id(), content: text, })
     }
-    "edit" => {
-      guard payload.text is Some(text) && !text.is_blank() else {
-        return { accepted: false, run_id: Some(run_id), }
-      }
+    QueueEdit(text~, ..) => {
+      guard !text.is_blank() else { return { accepted: false, } }
       guard live.queued_runs.search_by(queued => queued.id == id) is Some(index) else {
-        return { accepted: false, run_id: Some(run_id), }
+        return { accepted: false, }
       }
       let queued = live.queued_runs[index]
       live.queued_runs[index] = { ..queued, content: text, }
     }
-    "withdraw" => {
+    QueueWithdraw(..) => {
       guard live.queued_runs.search_by(queued => queued.id == id) is Some(index) else {
-        return { accepted: false, run_id: Some(run_id), }
+        return { accepted: false, }
       }
       ignore(live.queued_runs.remove(index))
     }
-    "steer" => {
+    QueueSteer(..) => {
       guard live.queued_runs.search_by(queued => queued.id == id) is Some(index) else {
-        return { accepted: false, run_id: Some(run_id), }
+        return { accepted: false, }
       }
       let queued = live.queued_runs[index]
       guard live.submit(
         @protocol.steer(queued.content),
         failure_reason="failed to write steering to the engine",
       ) else {
-        return { accepted: false, run_id: Some(run_id), }
+        return { accepted: false, }
       }
       // The ordinary steer receipt carries this queue id, keeping the
       // transient Steering row attached to the exact promoted input.
       ignore(live.steer_runs.record_sent(queued.content, Some(id)))
       ignore(live.queued_runs.remove(index))
     }
-    _ => return { accepted: false, run_id: Some(run_id), }
   }
-  { accepted: true, run_id: Some(run_id), }
+  { accepted: true, }
 }
 
 ///|

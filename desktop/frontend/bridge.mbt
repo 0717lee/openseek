@@ -1236,9 +1236,7 @@ fn queue_openseek(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   session : String,
-  action : String,
-  id : String,
-  text : String?,
+  action : @protocol.QueueAction,
   run_id : String,
 ) -> @cmd.Cmd {
   let root_dispatch = dispatch
@@ -1248,67 +1246,57 @@ fn queue_openseek(
       let accepted = try {
         let reply = @interop.bridge_request(channel, @commands.agent_queue, {
           action,
-          id,
-          text,
-          run_id: Some(run_id),
+          run_id,
         })
         reply.accepted
       } catch {
         error => {
-          if action == "add" {
-            scheduler.add(
-              dispatch(QueueAddRejected(session~, submission_id=id, run_id~)),
-            )
-          } else if action == "steer" {
-            scheduler.add(
+          scheduler.add(
+            match action {
+              QueueAdd(id~, ..) =>
+                dispatch(QueueAddRejected(session~, submission_id=id, run_id~))
+              QueueSteer(id~) =>
+                dispatch(
+                  QueueSteerRejected(
+                    session~,
+                    submission_id=id,
+                    run_id~,
+                    message="Queue action failed: \{@interop.bridge_error_text(error)}",
+                  ),
+                )
+              QueueEdit(..) | QueueWithdraw(..) =>
+                root_dispatch(
+                  HostActionFailed(
+                    "Queue action failed: \{@interop.bridge_error_text(error)}",
+                  ),
+                )
+            },
+          )
+          return
+        }
+      }
+      if !accepted {
+        scheduler.add(
+          match action {
+            QueueAdd(id~, ..) =>
+              dispatch(QueueAddRejected(session~, submission_id=id, run_id~))
+            QueueSteer(id~) =>
               dispatch(
                 QueueSteerRejected(
                   session~,
                   submission_id=id,
                   run_id~,
-                  message="Queue action failed: \{@interop.bridge_error_text(error)}",
+                  message="The queued message is no longer available.",
                 ),
-              ),
-            )
-          } else {
-            scheduler.add(
+              )
+            QueueEdit(..) | QueueWithdraw(..) =>
               root_dispatch(
-                HostActionFailed(
-                  "Queue action failed: \{@interop.bridge_error_text(error)}",
-                ),
-              ),
-            )
-          }
-          return
-        }
-      }
-      if !accepted {
-        if action == "add" {
-          scheduler.add(
-            dispatch(QueueAddRejected(session~, submission_id=id, run_id~)),
-          )
-        } else if action == "steer" {
-          scheduler.add(
-            dispatch(
-              QueueSteerRejected(
-                session~,
-                submission_id=id,
-                run_id~,
-                message="The queued message is no longer available.",
-              ),
-            ),
-          )
-        } else {
-          scheduler.add(
-            root_dispatch(
-              HostActionFailed("The queued message is no longer available."),
-            ),
-          )
-        }
-      } else {
-        scheduler.add(
-          dispatch(QueueAccepted(session~, action~, id~, text~, run_id~)),
+                HostActionFailed("The queued message is no longer available."),
+              )
+          },
         )
+      } else {
+        scheduler.add(dispatch(QueueAccepted(session~, action~, run_id~)))
       }
     })
   })

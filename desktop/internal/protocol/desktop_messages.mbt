@@ -74,15 +74,22 @@ pub(all) struct SteerPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// One mutation of the live follow-up queue. `text` is required by add and
-/// edit and absent for withdraw and steer. The queue belongs to the Desktop
+/// One valid mutation of the live follow-up queue. Operation-specific fields
+/// live on their operation, so the host never receives an action/text
+/// combination it still has to interpret. The queue belongs to the Desktop
 /// engine process and is never written to the session record.
+pub(all) enum QueueAction {
+  QueueAdd(id~ : String, text~ : String)
+  QueueEdit(id~ : String, text~ : String)
+  QueueWithdraw(id~ : String)
+  QueueSteer(id~ : String)
+} derive(Debug, Eq)
+
+///|
 pub(all) struct QueuePayload {
-  action : String
-  id : String
-  text : String?
-  run_id : String?
-} derive(Debug, Eq, FromJson, ToJson)
+  action : QueueAction
+  run_id : String
+} derive(Debug, Eq)
 
 ///|
 /// One answer to an engine's `approval_requested`, addressed by the id that
@@ -1134,9 +1141,7 @@ pub impl FromJson for SettingsStatusPayload with fn from_json(json, path) {
     has_deepseek_key: object.required_bool("has_deepseek_key"),
     has_glm_key: object.required_bool("has_glm_key"),
     has_custom_key: object.required_bool("has_custom_key"),
-    followup_behavior: object
-    .optional_string("followup_behavior")
-    .unwrap_or("steer"),
+    followup_behavior: object.required_string("followup_behavior"),
   }
 }
 
@@ -1959,6 +1964,12 @@ pub extend QueuePayload with Eq::{equal, not_equal}
 
 ///|
 pub extend QueuePayload with ToJson::{to_json}
+
+///|
+pub extend QueueAction with Debug::{to_repr}
+
+///|
+pub extend QueueAction with Eq::{equal, not_equal}
 
 ///|
 pub extend SubrunProgressPayload with Debug::{to_repr}

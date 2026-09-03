@@ -107,8 +107,18 @@ pub(all) struct SteerReply {
 ///|
 pub(all) struct QueueReply {
   accepted : Bool
-  run_id : String?
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for QueueReply with fn from_json(json, path) {
+  let object = JsonObject::decode(json, path, "queue reply")
+  { accepted: object.required_bool("accepted"), }
+}
+
+///|
+pub impl ToJson for QueueReply with fn to_json(self) {
+  { "accepted": self.accepted }
+}
 
 ///|
 pub(all) struct ApprovalReply {

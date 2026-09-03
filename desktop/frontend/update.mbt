@@ -2119,9 +2119,7 @@ fn update_msg(
                   dispatch,
                   conv.device,
                   conv.session_id,
-                  "steer",
-                  id,
-                  Some(item.content),
+                  @protocol.QueueSteer(id~),
                   run_id,
                 ),
                 model.replace_conversation(conv),
@@ -2137,9 +2135,7 @@ fn update_msg(
                   dispatch,
                   conv.device,
                   conv.session_id,
-                  "withdraw",
-                  id,
-                  None,
+                  @protocol.QueueWithdraw(id~),
                   run_id,
                 ),
                 if editing {
@@ -3471,9 +3467,7 @@ fn update_msg(
                 dispatch,
                 model.focused,
                 conv.session_id,
-                "edit",
-                id,
-                Some(task),
+                @protocol.QueueEdit(id~, text=task),
                 run_id,
               ),
               // Keep the edit in the composer until the in-memory mutation is
@@ -3495,9 +3489,7 @@ fn update_msg(
               dispatch,
               model.focused,
               conv.session_id,
-              "add",
-              submission_id,
-              Some(task),
+              @protocol.QueueAdd(id=submission_id, text=task),
               run_id,
             )
           } else {
@@ -5514,18 +5506,18 @@ fn update_device_msg(
       } else {
         (@cmd.none, model)
       }
-    QueueAccepted(session~, action~, id~, text~, run_id~) => {
+    QueueAccepted(session~, action~, run_id~) => {
       guard model.find_conversation(channel, session) is Some(conv) else {
         return (@cmd.none, model)
       }
       let next = match action {
-        "add" => {
+        @protocol.QueueAdd(id~, ..) => {
           let (next, _) = conv.acknowledge_steer(id, Some(run_id))
           next
         }
-        "edit" => {
-          guard text is Some(content) &&
-            conv.queued_inputs.search_by(item => item.id == id) is Some(index) else {
+        @protocol.QueueEdit(id~, text=content) => {
+          guard conv.queued_inputs.search_by(item => item.id == id)
+            is Some(index) else {
             return (@cmd.none, model)
           }
           let queued_inputs = conv.queued_inputs.copy()
@@ -5543,11 +5535,10 @@ fn update_device_msg(
             { ..conv, queued_inputs, }
           }
         }
-        "withdraw" | "steer" => {
+        @protocol.QueueWithdraw(id~) | @protocol.QueueSteer(id~) => {
           let (next, _) = conv.remove_queued_input(id)
           next
         }
-        _ => conv
       }
       (@cmd.none, model.replace_conversation(next))
     }

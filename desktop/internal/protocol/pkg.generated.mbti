@@ -1552,27 +1552,38 @@ pub fn PendingApprovalPayload::to_repr(Self) -> @debug.Repr
 pub impl ToJson for PendingApprovalPayload
 pub impl @json.FromJson for PendingApprovalPayload
 
+pub(all) enum QueueAction {
+  QueueAdd(id~ : String, text~ : String)
+  QueueEdit(id~ : String, text~ : String)
+  QueueWithdraw(id~ : String)
+  QueueSteer(id~ : String)
+} derive(Eq, @debug.Debug)
+pub fn QueueAction::equal(Self, Self) -> Bool
+pub fn QueueAction::not_equal(Self, Self) -> Bool
+pub fn QueueAction::to_repr(Self) -> @debug.Repr
+
 pub(all) struct QueuePayload {
-  action : String
-  id : String
-  text : String?
-  run_id : String?
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+  action : QueueAction
+  run_id : String
+} derive(Eq, @debug.Debug)
 pub fn QueuePayload::equal(Self, Self) -> Bool
 pub fn QueuePayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 pub fn QueuePayload::not_equal(Self, Self) -> Bool
 pub fn QueuePayload::to_json(Self) -> Json
 pub fn QueuePayload::to_repr(Self) -> @debug.Repr
+pub impl ToJson for QueuePayload
+pub impl @json.FromJson for QueuePayload
 
 pub(all) struct QueueReply {
   accepted : Bool
-  run_id : String?
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+} derive(Eq, @debug.Debug)
 pub fn QueueReply::equal(Self, Self) -> Bool
 pub fn QueueReply::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 pub fn QueueReply::not_equal(Self, Self) -> Bool
 pub fn QueueReply::to_json(Self) -> Json
 pub fn QueueReply::to_repr(Self) -> @debug.Repr
+pub impl ToJson for QueueReply
+pub impl @json.FromJson for QueueReply
 
 pub(all) struct ReadDirPayload {
   path : String
