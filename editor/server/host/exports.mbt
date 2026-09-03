@@ -19,18 +19,7 @@ pub impl @language.HoverProvider for MoonWorkspaceLanguageProvider with fn provi
   _token,
 ) {
   self.provide_hover_with_runner(model, position, (root, args) => {
-    let output = Some(
-      @process.collect_stdout(self.moon_command, args, cwd=root),
-    ) catch {
-      _ => None
-    }
-    match output {
-      Some((exit_code, data)) =>
-        Some((exit_code, data.text())) catch {
-          _ => None
-        }
-      None => None
-    }
+    (self.run_moon)(self.moon_command, root, args)
   })
 }
 
@@ -42,35 +31,7 @@ pub impl @language.DefinitionProvider for MoonWorkspaceLanguageProvider with fn 
   position,
   token,
 ) {
-  if token.is_cancellation_requested() {
-    return []
-  }
-  match @server.resolve_remote_document_uri(model.uri) {
-    ParsedRemotePath(path) => {
-      let root = self.current_root()
-      let loc = "\{path.to_string()}:\{position.line_number}:\{position.column}"
-      let output = Some(
-        @process.collect_stdout(
-          self.moon_command,
-          ["ide", "peek-def", "--loc", loc, "--json"],
-          cwd=root,
-        ),
-      ) catch {
-        _ => None
-      }
-      if token.is_cancellation_requested() {
-        return []
-      }
-      match output {
-        Some((0, data)) =>
-          parse_moon_definition_output(root, data.text()) catch {
-            _ => []
-          }
-        _ => []
-      }
-    }
-    RemotePathError(_) => []
-  }
+  self.provide_locations(model, position, token, "peek-def")
 }
 
 ///|
@@ -81,35 +42,7 @@ pub impl @language.ReferencesProvider for MoonWorkspaceLanguageProvider with fn 
   position,
   token,
 ) {
-  if token.is_cancellation_requested() {
-    return []
-  }
-  match @server.resolve_remote_document_uri(model.uri) {
-    ParsedRemotePath(path) => {
-      let root = self.current_root()
-      let loc = "\{path.to_string()}:\{position.line_number}:\{position.column}"
-      let output = Some(
-        @process.collect_stdout(
-          self.moon_command,
-          ["ide", "find-references", "--loc", loc, "--json"],
-          cwd=root,
-        ),
-      ) catch {
-        _ => None
-      }
-      if token.is_cancellation_requested() {
-        return []
-      }
-      match output {
-        Some((0, data)) =>
-          parse_moon_definition_output(root, data.text()) catch {
-            _ => []
-          }
-        _ => []
-      }
-    }
-    RemotePathError(_) => []
-  }
+  self.provide_locations(model, position, token, "find-references")
 }
 
 ///|

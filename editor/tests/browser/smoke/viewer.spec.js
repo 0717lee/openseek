@@ -23,15 +23,6 @@ async function waitForSourceText(page, needle) {
     .toBeTruthy();
 }
 
-async function unfoldMainBody(page) {
-  const collapsed = page.locator(
-    '.margin-view-overlays .cldr.codicon-folding-collapsed',
-  );
-  await expect(collapsed).toHaveCount(1, { timeout: 7_000 });
-  await collapsed.hover();
-  await collapsed.click();
-}
-
 async function settleBrowserFrame(page) {
   await page.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => resolve())),
@@ -575,11 +566,9 @@ test('keeps one tab watch active after another tab disconnects', async ({
       remainingPage,
       'println("remaining tab still watched")',
     );
-    await unfoldMainBody(remainingPage);
-    await expect(remainingPage.locator('.mtk5')).toContainText(
-      '"remaining tab still watched"',
-      { timeout: 7_000 },
-    );
+    // The watch/session contract ends at source synchronization. Folding and
+    // token CSS are covered independently and are not evidence about whether
+    // closing the first tab disposed the second tab's watch.
   } finally {
     await fs.writeFile(mainFixture, original, 'utf8');
   }

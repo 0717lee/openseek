@@ -10,6 +10,7 @@ struct MoonWorkspaceLanguageProvider {
   /// against the currently served root.
   root : Ref[String]
   moon_command : String
+  run_moon : async (String, String, Array[String]) -> (Int, String)?
 }
 
 ///|
@@ -18,7 +19,36 @@ fn new_moon_workspace_language_provider(
   root : Ref[String],
   moon_command? : String = "moon",
 ) -> MoonWorkspaceLanguageProvider {
-  { root, moon_command, }
+  new_moon_workspace_language_provider_with_runner(
+    root, moon_command, collect_moon_command_output,
+  )
+}
+
+///|
+fn new_moon_workspace_language_provider_with_runner(
+  root : Ref[String],
+  moon_command : String,
+  run_moon : async (String, String, Array[String]) -> (Int, String)?,
+) -> MoonWorkspaceLanguageProvider {
+  { root, moon_command, run_moon, }
+}
+
+///|
+async fn collect_moon_command_output(
+  command : String,
+  root : String,
+  args : Array[String],
+) -> (Int, String)? {
+  let output = Some(@process.collect_stdout(command, args, cwd=root)) catch {
+    _ => None
+  }
+  match output {
+    Some((exit_code, data)) =>
+      Some((exit_code, data.text())) catch {
+        _ => None
+      }
+    None => None
+  }
 }
 
 ///|
@@ -83,6 +113,36 @@ async fn MoonWorkspaceLanguageProvider::provide_hover_with_runner(
       }
     }
     RemotePathError(_) => None
+  }
+}
+
+///|
+async fn MoonWorkspaceLanguageProvider::provide_locations(
+  self : MoonWorkspaceLanguageProvider,
+  model : @model.TextModel,
+  position : @base_common.Position,
+  token : @language.CancellationToken,
+  subcommand : String,
+) -> Array[@language.Location] {
+  if token.is_cancellation_requested() {
+    return []
+  }
+  match @server.resolve_remote_document_uri(model.uri) {
+    ParsedRemotePath(path) => {
+      let root = self.current_root()
+      let loc = "\{path.to_string()}:\{position.line_number}:\{position.column}"
+      let output = (self.run_moon)(self.moon_command, root, [
+        "ide", subcommand, "--loc", loc, "--json",
+      ])
+      if token.is_cancellation_requested() {
+        return []
+      }
+      match output {
+        Some((0, raw)) => parse_moon_definition_output_impl(root, raw)
+        _ => []
+      }
+    }
+    RemotePathError(_) => []
   }
 }
 
