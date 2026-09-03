@@ -161,11 +161,8 @@
     > .topbar-toggle {
     top: 4px;
   }
-  button.secondary,
-  button.primary:not(.sidebar-button),
-  a.setting-link,
-  .portal-button-link,
-  .modal-actions button {
+  .button,
+  .portal-button-link {
     min-height: 44px;
     padding-top: 10px;
     padding-bottom: 10px;
