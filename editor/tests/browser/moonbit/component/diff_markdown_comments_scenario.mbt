@@ -95,21 +95,21 @@ fn diff_markdown_comment_editor_options(
 ) -> @viewer.ViewerOptions {
   match folding_mode {
     "disabled" =>
-      @viewer.ViewerOptions(
+      ViewerOptions(
         soft_wrap=true,
         smooth_scrolling=false,
         line_numbers_min_chars=1,
         folding=false,
       )
     "never" =>
-      @viewer.ViewerOptions(
+      ViewerOptions(
         soft_wrap=true,
         smooth_scrolling=false,
         line_numbers_min_chars=1,
         show_folding_controls=Never,
       )
     _ =>
-      @viewer.ViewerOptions(
+      ViewerOptions(
         soft_wrap=true,
         smooth_scrolling=false,
         line_numbers_min_chars=1,
