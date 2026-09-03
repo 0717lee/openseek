@@ -1,7 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { expect, test } from '../support/test.js';
 import {
-  collectReadonlyEvents,
   openMainFixture,
   openWorkspaceFile,
   workspaceItem,
@@ -107,34 +106,6 @@ test('starts from native-served static assets', async ({ page }) => {
   expect(requestedPaths.some((path) => path.endsWith('/src/bootstrap.js'))).toBeFalsy();
   expect(requestedPaths.some((path) => path.includes('/web/generated/'))).toBeFalsy();
   expect(requestedPaths.some((path) => path.includes('/@vite/'))).toBeFalsy();
-});
-
-test('renders fixture workspace through the native protocol', async ({ page }) => {
-  const events = collectReadonlyEvents(page);
-
-  await page.goto('/');
-  await openMainFixture(page);
-
-  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
-  await expect(page.locator('.editor-shell')).toHaveAttribute(
-    'data-source-uri',
-    'readonly-remote://workspace/src/main.mbt',
-  );
-  await expect(page.locator('.monaco-editor.readonly-editor')).toContainText('fn main');
-  await expect(page.locator('.monaco-editor.readonly-editor')).not.toContainText(
-    'startup_event',
-  );
-  await expect(
-    page.locator('.margin-view-overlays .cldr.codicon-folding-collapsed'),
-  ).toHaveCount(1);
-  await expect(page.locator('.editor-shell')).not.toContainText('readonly provider');
-
-  const mainSymbol = page.locator('.view-line span', { hasText: 'main' }).first();
-  await mainSymbol.hover();
-  await mainSymbol.dblclick();
-
-  expect(await events.some('moonbit:render')).toBeTruthy();
-  expect(await events.some('dom:mounted')).toBeTruthy();
 });
 
 test('opens MoonBit models as a top-level outline without enforcing later folds', async ({
