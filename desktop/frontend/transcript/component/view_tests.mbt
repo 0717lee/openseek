@@ -1,4 +1,9 @@
 ///|
+fn render_markup(view : @html.Html) -> String {
+  @vdom.server_side_render(() => view.to_virtual_dom())
+}
+
+///|
 test "transcript stream children use stable typed keys in display order" {
   let first_tool : @transcript.TranscriptItem = {
     kind: Tool(
@@ -182,19 +187,13 @@ test "durable assistant sequences render as separate foldable steps" {
     "row\u{0}s1\u{0}o0", "rule\u{0}s1\u{0}o0", "row\u{0}s2\u{0}o1", "activity\u{0}after\u{0}s1\u{0}o0",
     "activity\u{0}after\u{0}s2\u{0}o1", "row\u{0}s4\u{0}o2", "activity\u{0}after\u{0}s3\u{0}o0",
   ])
-  let first_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
-  })
-  let second_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(children["activity\u{0}after\u{0}s3\u{0}o0"])
-  })
-  let notice_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(children["activity\u{0}after\u{0}s2\u{0}o1"])
-  })
-  assert_true(first_markup.contains(step_summary(1, "")))
+  let first_markup = render_markup(children["activity\u{0}after\u{0}s1\u{0}o0"])
+  let second_markup = render_markup(children["activity\u{0}after\u{0}s3\u{0}o0"])
+  let notice_markup = render_markup(children["activity\u{0}after\u{0}s2\u{0}o1"])
+  assert_true(first_markup.contains("#1 · Thought"))
   assert_true(first_markup.contains("first thought"))
   assert_false(first_markup.contains("second thought"))
-  assert_true(second_markup.contains(step_summary(2, "")))
+  assert_true(second_markup.contains("#2 · Thought"))
   assert_true(second_markup.contains("second thought"))
   assert_false(second_markup.contains("first thought"))
   assert_true(notice_markup.contains("Goal set"))
@@ -259,9 +258,7 @@ test "a durable step with prose and tool calls renders its prose first" {
   assert_eq(keys, [
     "row\u{0}s1\u{0}o0", "rule\u{0}s1\u{0}o0", "row\u{0}s2\u{0}o0", "activity\u{0}after\u{0}s1\u{0}o0",
   ])
-  let activity_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
-  })
+  let activity_markup = render_markup(children["activity\u{0}after\u{0}s1\u{0}o0"])
   // A tool-only step's heading is the bare ordinal, no label separator.
   assert_true(activity_markup.contains("#1</span>"))
   assert_true(
@@ -313,9 +310,7 @@ test "live step hands off to its durable assistant card key" {
     on_open_session: _ => @cmd.none,
   }
   let live = live_renderer.stream_children()
-  let first_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(live["activity\u{0}after\u{0}s1\u{0}o0"])
-  })
+  let first_markup = render_markup(live["activity\u{0}after\u{0}s1\u{0}o0"])
   // A tool-only step has no thought fold: its ordinal sits on a plain heading
   // line and the call itself is on display as its own row.
   assert_true(first_markup.contains("activity-heading"))
@@ -326,10 +321,8 @@ test "live step hands off to its durable assistant card key" {
   assert_false(first_markup.contains("<details class=\"activity\""))
   let handoff_key = "activity\u{0}after\u{0}s2\u{0}o0"
   assert_true(live.get(handoff_key) is Some(_))
-  let live_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(live[handoff_key])
-  })
-  assert_true(live_markup.contains(step_summary(2, "Thinking…")))
+  let live_markup = render_markup(live[handoff_key])
+  assert_true(live_markup.contains("#2 · Thinking…"))
   assert_true(live_markup.contains("<details class=\"activity\" open"))
 
   let settled_input = {
@@ -360,10 +353,8 @@ test "live step hands off to its durable assistant card key" {
   }
   let settled = { ..live_renderer, input: settled_input, }.stream_children()
   assert_true(settled.get(handoff_key) is Some(_))
-  let settled_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(settled[handoff_key])
-  })
-  assert_true(settled_markup.contains(step_summary(2, "Thought")))
+  let settled_markup = render_markup(settled[handoff_key])
+  assert_true(settled_markup.contains("#2 · Thought"))
   assert_true(settled_markup.contains("next thought"))
   assert_false(settled_markup.contains("<details class=\"activity\" open"))
 }
@@ -452,25 +443,19 @@ test "an ambiguous commit-first prefix keeps live reasoning visible" {
     "row\u{0}s1\u{0}o0", "rule\u{0}s1\u{0}o0", "row\u{0}s2\u{0}o1", "activity\u{0}after\u{0}s1\u{0}o0",
     "row\u{0}s3\u{0}o1", "activity\u{0}after\u{0}s2\u{0}o1", "activity\u{0}after\u{0}s3\u{0}o1",
   ])
-  let markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
-  })
-  assert_true(markup.contains(step_summary(1, "Thought")))
+  let markup = render_markup(children["activity\u{0}after\u{0}s1\u{0}o0"])
+  assert_true(markup.contains("#1 · Thought"))
   assert_true(markup.contains("<span class=\"tool-call-text\">read</span>"))
   assert_true(markup.contains("complete thought"))
   assert_false(markup.contains("activity-thinking-live"))
   assert_false(markup.contains("#2"))
-  let later_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(children["activity\u{0}after\u{0}s2\u{0}o1"])
-  })
-  assert_true(later_markup.contains(step_summary(2, "Thought")))
+  let later_markup = render_markup(children["activity\u{0}after\u{0}s2\u{0}o1"])
+  assert_true(later_markup.contains("#2 · Thought"))
   assert_true(later_markup.contains("later thought"))
   assert_false(later_markup.contains("activity-thinking-live"))
   assert_false(later_markup.contains("#3"))
-  let live_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(children["activity\u{0}after\u{0}s3\u{0}o1"])
-  })
-  assert_true(live_markup.contains(step_summary(3, "Thinking…")))
+  let live_markup = render_markup(children["activity\u{0}after\u{0}s3\u{0}o1"])
+  assert_true(live_markup.contains("#3 · Thinking…"))
   assert_true(live_markup.contains("complete"))
   assert_true(live_markup.contains("activity-thinking-live"))
 }
@@ -501,9 +486,7 @@ test "live reasoning is plain text and keeps the durable activity key" {
   }
   let live_children = live_renderer.stream_children()
   assert_true(live_children.get("activity\u{0}after\u{0}s1\u{0}o0") is Some(_))
-  let live_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(live_children["activity\u{0}after\u{0}s1\u{0}o0"])
-  })
+  let live_markup = render_markup(live_children["activity\u{0}after\u{0}s1\u{0}o0"])
   assert_true(live_markup.contains("*unfinished*\nnext"))
   assert_false(live_markup.contains("<em>unfinished</em>"))
   assert_true(live_markup.contains("<details class=\"activity\" open"))
@@ -512,11 +495,9 @@ test "live reasoning is plain text and keeps the durable activity key" {
     ..live_renderer,
     input: { ..live_input, reasoning_complete: true, },
   }
-  let complete_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(
-      complete_renderer.stream_children()["activity\u{0}after\u{0}s1\u{0}o0"],
-    )
-  })
+  let complete_markup = render_markup(
+    complete_renderer.stream_children()["activity\u{0}after\u{0}s1\u{0}o0"],
+  )
   assert_true(complete_markup.contains("<em>unfinished</em>"))
 
   let settled = {
@@ -549,9 +530,9 @@ test "live reasoning is plain text and keeps the durable activity key" {
   assert_true(
     settled_children.get("activity\u{0}after\u{0}s1\u{0}o0") is Some(_),
   )
-  let settled_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(settled_children["activity\u{0}after\u{0}s1\u{0}o0"])
-  })
+  let settled_markup = render_markup(
+    settled_children["activity\u{0}after\u{0}s1\u{0}o0"],
+  )
   assert_true(settled_markup.contains("<em>unfinished</em>"))
 }
 

@@ -5,6 +5,7 @@ import {
   "moonbit-community/rabbita/clipboard",
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/dom",
+  "moonbit-community/rabbita/internal/vdom",
   "moonbit-community/rabbita/html",
   "moonbit-community/rabbita/js",
   "moonbit-community/rabbita/sub",
