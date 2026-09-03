@@ -113,6 +113,12 @@ pub let session_archive : Command[
 ] = Command("session.archive")
 
 ///|
+pub let session_rename : Command[
+  @protocol.SessionRenamePayload,
+  @protocol.EmptyReply,
+] = Command("session.rename")
+
+///|
 pub let session_unarchive : Command[
   @protocol.SessionPayload,
   @protocol.SessionsReply,
@@ -317,6 +323,12 @@ pub let codex_thread_unarchive : Command[
   @protocol.CodexThreadPayload,
   @protocol.CodexCommandReply[@protocol.EmptyReply],
 ] = Command("codex.thread.unarchive")
+
+///|
+pub let codex_thread_rename : Command[
+  @protocol.CodexThreadRenamePayload,
+  @protocol.CodexCommandReply[@protocol.EmptyReply],
+] = Command("codex.thread.rename")
 
 ///|
 pub let codex_thread_compact : Command[

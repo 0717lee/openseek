@@ -618,6 +618,18 @@ pub fn CodexThreadReadPayload::to_repr(Self) -> @debug.Repr
 pub impl ToJson for CodexThreadReadPayload
 pub impl @json.FromJson for CodexThreadReadPayload
 
+pub(all) struct CodexThreadRenamePayload {
+  thread_id : String
+  name : String
+} derive(Eq, @debug.Debug)
+pub fn CodexThreadRenamePayload::equal(Self, Self) -> Bool
+pub fn CodexThreadRenamePayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CodexThreadRenamePayload::not_equal(Self, Self) -> Bool
+pub fn CodexThreadRenamePayload::to_json(Self) -> Json
+pub fn CodexThreadRenamePayload::to_repr(Self) -> @debug.Repr
+pub impl ToJson for CodexThreadRenamePayload
+pub impl @json.FromJson for CodexThreadRenamePayload
+
 pub(all) struct CodexThreadReply {
   thread : Json
 } derive(Eq, @debug.Debug)
@@ -1958,6 +1970,19 @@ pub fn SessionPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonD
 pub fn SessionPayload::not_equal(Self, Self) -> Bool
 pub fn SessionPayload::to_json(Self) -> Json
 pub fn SessionPayload::to_repr(Self) -> @debug.Repr
+
+pub(all) struct SessionRenamePayload {
+  session : String
+  workspace : String
+  title : String
+} derive(Eq, @debug.Debug)
+pub fn SessionRenamePayload::equal(Self, Self) -> Bool
+pub fn SessionRenamePayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn SessionRenamePayload::not_equal(Self, Self) -> Bool
+pub fn SessionRenamePayload::to_json(Self) -> Json
+pub fn SessionRenamePayload::to_repr(Self) -> @debug.Repr
+pub impl ToJson for SessionRenamePayload
+pub impl @json.FromJson for SessionRenamePayload
 
 pub(all) struct SessionRuntimeNotice {
   content : String

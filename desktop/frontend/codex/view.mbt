@@ -95,7 +95,7 @@ fn SidebarContext::draft_input(
   let root = draft.project_root.unwrap_or(draft.cwd).trim().to_owned()
   {
     id: @conversation.Id(
-      source="codex.draft",
+      source=@conversation.CodexDraft,
       channel=self.channel.uri_authority(),
       conversation=draft.id,
       root?=if root.is_empty() { None } else { Some(root) },
@@ -108,11 +108,14 @@ fn SidebarContext::draft_input(
     nested,
     subrun: false,
     active: self.selected,
+    loading: false,
+    load_failed: false,
     running: false,
     openable: true,
     worktree: None,
     run_mark: @conversation.NoRunMark,
     trailing: [],
+    rename: None,
     children: [],
   }
 }
@@ -258,7 +261,7 @@ fn CodexThreadRow::archived_sidebar_input(
 ) -> @conversation.Input {
   {
     id: @conversation.Id(
-      source="codex.archived",
+      source=@conversation.CodexArchived,
       channel=channel.uri_authority(),
       conversation=self.id,
       root?=self.project_root,
@@ -268,6 +271,8 @@ fn CodexThreadRow::archived_sidebar_input(
     nested: false,
     subrun: false,
     active: false,
+    loading: false,
+    load_failed: false,
     running: false,
     openable: false,
     worktree: None,
@@ -277,6 +282,7 @@ fn CodexThreadRow::archived_sidebar_input(
         title="Restore this Codex conversation to the sidebar",
       ),
     ],
+    rename: None,
     children: [],
   }
 }
@@ -314,7 +320,7 @@ fn CodexThreadRow::sidebar_input(
   let run_mark = state.activity.presentation(self.id)
   {
     id: @conversation.Id(
-      source="codex.live",
+      source=@conversation.CodexLive,
       channel=context.channel.uri_authority(),
       conversation=self.id,
       root?=self.project_root,
@@ -324,6 +330,8 @@ fn CodexThreadRow::sidebar_input(
     nested,
     subrun: false,
     active: selected,
+    loading: false,
+    load_failed: false,
     running: run_mark is @conversation.RunningMark,
     openable: true,
     worktree: self.worktree
@@ -331,6 +339,7 @@ fn CodexThreadRow::sidebar_input(
     .map(worktree => worktree.name),
     run_mark,
     trailing: [@conversation.Archive(title="Archive Codex conversation")],
+    rename: None,
     children: [],
   }
 }

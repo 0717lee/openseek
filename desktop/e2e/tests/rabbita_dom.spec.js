@@ -850,6 +850,212 @@ test('new chat, archive, and restore update the conversation sidebar', async ({ 
   expect(app.pageErrors).toEqual([]);
 });
 
+test('shared WebView action menu supports context position, keyboard, and rename', async ({ page }) => {
+  const app = new DesktopBrowserHarness(page);
+  app.workspaces.push('/other');
+  await app.install();
+  await app.goto();
+
+  const firstWorkspace = page.locator('.workspace-row[title="/workspace"]');
+  const secondWorkspace = page.locator('.workspace-row[title="/other"]');
+  const firstWorkspaceMenu = firstWorkspace.getByTitle('More actions');
+  const secondWorkspaceMenu = secondWorkspace.getByTitle('More actions');
+  await firstWorkspace.hover();
+  await firstWorkspaceMenu.click();
+  await expect(firstWorkspaceMenu).toHaveAttribute('aria-expanded', 'true');
+  let menu = page.getByRole('menu', { name: 'Workspace actions' });
+  await expect(menu).toBeFocused();
+  await expect(menu.getByRole('menuitem').first()).not.toBeFocused();
+  await secondWorkspace.hover();
+  await secondWorkspaceMenu.click();
+  await expect(firstWorkspaceMenu).toHaveAttribute('aria-expanded', 'false');
+  await expect(secondWorkspaceMenu).toHaveAttribute('aria-expanded', 'true');
+  menu = page.getByRole('menu', { name: 'Workspace actions' });
+  await expect(menu).toBeFocused();
+  await secondWorkspaceMenu.click();
+  await expect(page.getByRole('menu')).toHaveCount(0);
+
+  await secondWorkspaceMenu.focus();
+  await page.keyboard.press('Enter');
+  menu = page.getByRole('menu', { name: 'Workspace actions' });
+  await expect(menu).toBeFocused();
+  await expect(menu.getByRole('menuitem').first()).not.toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem').first()).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(secondWorkspaceMenu).toBeFocused();
+
+  const liveRow = page.locator('.conversation-row[title="session-1"]');
+  const archiveButton = liveRow.getByTitle(/Archive —/);
+  await liveRow.hover();
+  await archiveButton.focus();
+  await liveRow.click({ button: 'right', position: { x: 18, y: 18 } });
+  menu = page.getByRole('menu', { name: 'Conversation actions' });
+  await expect(menu).toBeVisible();
+  const rename = menu.getByRole('menuitem', { name: 'Rename…' });
+  const archive = menu.getByRole('menuitem', { name: 'Archive' });
+  await expect(menu).toBeFocused();
+  await expect(rename).not.toBeFocused();
+  await expect(rename).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+
+  await page.keyboard.press('ArrowDown');
+  await expect(rename).toBeFocused();
+
+  const bounds = await menu.boundingBox();
+  const viewport = page.viewportSize();
+  expect(bounds).not.toBeNull();
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.y).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height);
+
+  await page.keyboard.press('ArrowDown');
+  await expect(archive).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(rename).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(archiveButton).toBeFocused();
+  await expect(liveRow.getByRole('button', { name: 'Conversation actions' })).toHaveCount(0);
+
+  await liveRow.click({ button: 'right', position: { x: 18, y: 18 } });
+  await page.getByRole('menuitem', { name: 'Rename…' }).click({ button: 'right' });
+  const input = page.getByRole('textbox', { name: 'Rename conversation' });
+  await expect(input).toBeFocused();
+  await expect.poll(() => input.evaluate(element => ({
+    start: element.selectionStart,
+    end: element.selectionEnd,
+    length: element.value.length,
+  }))).toEqual({ start: 0, end: 23, length: 23 });
+  await input.fill('Renamed in WebView');
+  await input.click({ button: 'right' });
+  await expect(menu).toHaveCount(0);
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect.poll(() => app.requests.find(request =>
+    request.method === 'session.rename')).toMatchObject({
+      params: {
+        session: 'session-1',
+        workspace: '/workspace',
+        title: 'Renamed in WebView',
+      },
+    });
+
+  app.rpcErrors.set('session.rename', 'fixture rename unavailable');
+  await liveRow.click({ button: 'right', position: { x: 18, y: 18 } });
+  await page.getByRole('menuitem', { name: 'Rename…' }).click();
+  await input.fill('Rename that will fail');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('alert')).toContainText(
+    'Rename failed: fixture rename unavailable',
+  );
+  await expect(input).toHaveValue('Rename that will fail');
+  await expect(input).toBeEnabled();
+  expect(app.pageErrors).toEqual([]);
+});
+
+test('sidebar menu dismissal and pending selection follow the clicked row', async ({ page }) => {
+  const app = new DesktopBrowserHarness(page);
+  app.liveSessions.push({
+    id: 'session-2',
+    title: 'Second browser fixture',
+    updated_at_ms: 2,
+  });
+  await app.install();
+  await app.goto();
+
+  const workspace = page.locator('.workspace-row', { hasText: 'workspace' });
+  await workspace.click({ button: 'right', position: { x: 24, y: 16 } });
+  await expect(page.getByRole('menu', { name: 'Workspace actions' })).toBeVisible();
+
+  const first = page.locator('.conversation-row[title="session-1"]');
+  await first.click({ position: { x: 220, y: 16 } });
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await expect(first).toHaveClass(/active/);
+  await expect(page.getByText('Browser result', { exact: true })).toBeVisible();
+
+  app.rpcDelays.set('session.load', 10000);
+  await first.click({ button: 'right', position: { x: 18, y: 18 } });
+  await expect(page.getByRole('menu', { name: 'Conversation actions' })).toBeVisible();
+  const second = page.locator('.conversation-row[title="session-2"]');
+  await second.click();
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await expect(second).toHaveClass(/active/);
+  await expect(first).not.toHaveClass(/active/);
+  await expect(second.getByRole('status', { name: 'Loading conversation' })).toBeVisible();
+  await expect(page.getByText('Loading conversation…', { exact: true })).toBeVisible();
+  const rowSpinner = second.locator('.conversation-load-spinner');
+  const panelSpinner = page.locator('.conversation-load-state-spinner');
+  await expect(rowSpinner).toHaveCSS('animation-name', 'conversation-load-spin');
+  await expect(panelSpinner).toHaveCSS('animation-name', 'conversation-load-spin');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(rowSpinner).toHaveCSS('animation-name', 'none');
+  await expect(panelSpinner).toHaveCSS('animation-name', 'none');
+  await expect(page.getByText('Browser result', { exact: true })).toHaveCount(0);
+  await expect.poll(() => app.requests.some(request =>
+    request.method === 'session.load' && request.params?.session === 'session-2'))
+    .toBe(true);
+  expect(app.pageErrors).toEqual([]);
+});
+
+test('removing a pending selection exits its loading state', async ({ page }) => {
+  const app = new DesktopBrowserHarness(page);
+  app.liveSessions.push({
+    id: 'session-2',
+    title: 'Second browser fixture',
+    updated_at_ms: 2,
+  });
+  await app.install();
+  await app.goto();
+
+  app.rpcDelays.set('session.load', 10000);
+  const pending = page.locator('.conversation-row[title="session-2"]');
+  await pending.click();
+  await expect(pending).toHaveClass(/active/);
+  await expect(page.getByText('Loading conversation…', { exact: true })).toBeVisible();
+  await pending.click({ button: 'right', position: { x: 18, y: 18 } });
+  await expect(page.getByRole('menu', { name: 'Conversation actions' })).toBeVisible();
+
+  app.liveSessions = app.liveSessions.filter(session => session.id !== 'session-2');
+  app.archivedSessions.push({
+    id: 'session-2',
+    title: 'Second browser fixture',
+    updated_at_ms: 2,
+  });
+  app.notify('session.changed', {
+    change: 'archived',
+    session: 'session-2',
+    workspace: '/workspace',
+  });
+
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await expect(page.getByText('Loading conversation…', { exact: true })).toHaveCount(0);
+  await expect(page.locator('#task')).toBeVisible();
+  await expect(page.locator('.conversation-row', { hasText: 'New chat' })).toBeVisible();
+  expect(app.pageErrors).toEqual([]);
+});
+
+test('a failed first conversation load keeps selection and can retry', async ({ page }) => {
+  const app = new DesktopBrowserHarness(page);
+  app.rpcErrors.set('session.load', 'fixture unavailable');
+  await app.install();
+  await app.goto();
+
+  const row = page.locator('.conversation-row[title="session-1"]');
+  await row.click();
+  await expect(row).toHaveClass(/active/);
+  await expect(page.getByText('Could not load conversation', { exact: true })).toBeVisible();
+  await expect(page.getByText(/fixture unavailable/).last()).toBeVisible();
+  await expect(row).toHaveClass(/load-failed/);
+
+  app.rpcErrors.delete('session.load');
+  await page.getByRole('button', { name: 'Retry' }).click();
+  await expect(page.getByText('Browser result', { exact: true })).toBeVisible();
+  await expect(row).toHaveClass(/active/);
+  await expect(row).not.toHaveClass(/load-failed/);
+  expect(app.pageErrors).toEqual([]);
+});
+
 test('settings change and preserve the visible font size', async ({ page }) => {
   const app = new DesktopBrowserHarness(page);
   await app.install();
@@ -1065,7 +1271,7 @@ test('workspace settings open and persist per-workspace choices', async ({ page 
   // The project row's "…" menu is the way into a workspace's settings page.
   await page.locator('.workspace-row', { hasText: 'workspace' }).hover();
   await page.getByTitle('More actions').click();
-  await page.getByRole('button', { name: 'Workspace settings' }).click();
+  await page.getByRole('menuitem', { name: 'Workspace settings' }).click();
   await expect(page.getByRole('heading', { name: 'workspace' })).toBeVisible();
   await expect(page.locator('.settings-subtitle')).toHaveText('/workspace');
 
@@ -1124,7 +1330,7 @@ test('workspace settings open and persist per-workspace choices', async ({ page 
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
   await page.locator('.workspace-row', { hasText: 'workspace' }).hover();
   await page.getByTitle('More actions').click();
-  await page.getByRole('button', { name: 'Workspace settings' }).click();
+  await page.getByRole('menuitem', { name: 'Workspace settings' }).click();
   await expect(page.getByRole('button', { name: 'New chats' })).toHaveText('Worktree');
   await expect(page.getByRole('button', { name: 'Submodules in worktrees' })).toHaveText('Initialize');
   await expect(page.getByRole('button', { name: 'Submodule checkout timeout' })).toHaveText('60 seconds');
@@ -1150,7 +1356,7 @@ test('workspace settings open and persist per-workspace choices', async ({ page 
   app.notify('workspace.changed', { workspaces: ['/workspace'] });
   await page.locator('.workspace-row', { hasText: 'workspace' }).hover();
   await page.getByTitle('More actions').click();
-  await page.getByRole('button', { name: 'Workspace settings' }).click();
+  await page.getByRole('menuitem', { name: 'Workspace settings' }).click();
   const reopened = page.getByRole('button', { name: 'New chats' });
   await expect(reopened).toHaveAttribute('aria-expanded', 'false');
   await reopened.click();

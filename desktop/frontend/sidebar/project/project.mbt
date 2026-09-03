@@ -29,11 +29,6 @@ pub fn Id::root(self : Id) -> String {
 }
 
 ///|
-fn Id::subscription_key(self : Id) -> String {
-  "sidebar-project-menu:\{self.source}:\{self.channel}:\{self.root}"
-}
-
-///|
 /// The DOM child key for this project's folder row inside the sidebar's one
 /// keyed container.
 pub fn Id::key(self : Id) -> String {
@@ -72,8 +67,6 @@ pub(all) struct Actions {
 priv enum Msg {
   ToggleDisclosure
   ShowMore
-  ToggleMenu
-  CloseMenu
 }
 
 ///|
@@ -89,7 +82,6 @@ priv enum Fold {
 priv struct State {
   fold : Fold
   preview_limit : Int
-  menu_open : Bool
 } derive(Eq)
 
 ///|
@@ -105,20 +97,14 @@ fn State::update(self : State, input : Input, msg : Msg) -> State {
       // Toggle the fold the user sees: a stored fold currently overridden by
       // an activation reveal must fold on click, not silently flip to open.
       if self.folded(input) {
-        { ..self, fold: Open, menu_open: false, }
+        { ..self, fold: Open, }
       } else {
         // Folding ends the current preview session. Opening the project again
         // starts from the compact five-chat view, even after several Show
         // more clicks.
-        {
-          fold: Folded(during=input.activation),
-          preview_limit: PreviewLimit,
-          menu_open: false,
-        }
+        { fold: Folded(during=input.activation), preview_limit: PreviewLimit, }
       }
     ShowMore => { ..self, preview_limit: self.next_preview_limit(input), }
-    ToggleMenu => { ..self, menu_open: !self.menu_open, }
-    CloseMenu => { ..self, menu_open: false, }
   }
 }
 
@@ -170,58 +156,29 @@ fn State::has_hidden_conversation(self : State, input : Input) -> Bool {
 }
 
 ///|
-/// Capture-phase dismissal belongs to the project component whose menu is
-/// open. It disappears with that keyed component branch.
-priv struct Dismiss {
-  key : String
-  emit : @cmd.Emit[Unit]
-}
-
-///|
-priv suberror DismissPayload {
-  DismissPayload(String, @cmd.Emit[Unit])
-}
-
-///|
-fn Dismiss::subscription(self : Dismiss) -> @sub.Sub {
-  @sub.custom_sub(self.key, @sub.Global, DismissPayload(self.key, self.emit), (
-    payload,
-    scheduler,
-  ) => Dismiss::load(payload, scheduler))
-}
-
-///|
-fn Dismiss::load(
-  payload : Error,
-  scheduler : &@cmd.Scheduler,
-) -> @sub.RunningSub? {
-  guard payload is DismissPayload(key, emit) else { return None }
-  let mut emit = emit
-  let target = @dom.document().as_event_target()
-  let listener : @dom.Listener = event => {
-    if event.target().to_element() is Some(element) &&
-      element.closest(".workspace-menu-button") is Some(button) &&
-      button.get_attribute("data-sidebar-project-menu") is Some(trigger_key) &&
-      trigger_key == key {
-      // The owning trigger toggles this menu in its target-phase handler. A
-      // different project's trigger is outside this component and therefore
-      // dismisses this menu before opening its own.
-      return
-    }
-    scheduler.add(emit(()))
-  }
-  target.add_event_listener_with_options("click", listener, capture=true)
-  Some({
-    unload: _ => {
-      target.remove_event_listener_with_options("click", listener, capture=true)
-    },
-    update_tagger: next => {
-      guard next is DismissPayload(next_key, next_emit) && next_key == key else {
-        return
-      }
-      emit = next_emit
-    },
-  })
+pub fn Input::menu_entries(
+  self : Input,
+  actions : Actions,
+) -> Array[@action_menu.Entry] {
+  [
+    Action({
+      label: "Workspace settings",
+      title: "Defaults for new chats in this workspace",
+      icon: Some(@icons.icon(@icons.icon_settings_gear)),
+      enabled: true,
+      destructive: false,
+      command: (actions.open_settings)(self.id),
+    }),
+    Separator,
+    Action({
+      label: "Detach project",
+      title: "Detach this project — its files and sessions stay",
+      icon: Some(@icons.icon(@icons.icon_close)),
+      enabled: true,
+      destructive: false,
+      command: (actions.detach)(self.id),
+    }),
+  ]
 }
 
 ///|
@@ -234,34 +191,19 @@ fn Actions::conversation_component(
 }
 
 ///|
-/// One keyed project component owns disclosure, compact-preview, and menu
-/// state. Those values therefore cannot leak to an equal path rendered by a
-/// different sidebar source. Rows are (key, node) pairs for the sidebar's one
-/// keyed container.
+/// One keyed project component owns disclosure and compact-preview state.
+/// Those values therefore cannot leak to an equal path rendered by a
+/// different sidebar source. The shared action-menu component owns the one
+/// menu overlay.
+/// Rows are (key, node) pairs for the sidebar's one keyed container.
 pub fn component(
   input : @rabbita.Val[Input],
   actions : Actions,
 ) -> @rabbita.Val[Array[(String, @html.Html)]] {
   let (state, emit) = @rabbita.create_state_with_input(
     input~,
-    init=(_, _) => {
-      (
-        { fold: Open, preview_limit: PreviewLimit, menu_open: false, },
-        @cmd.none,
-      )
-    },
+    init=(_, _) => ({ fold: Open, preview_limit: PreviewLimit, }, @cmd.none),
     update=(state, input, msg, _) => (state.update(input, msg), @cmd.none),
-    subscriptions=(state, input, emit) => {
-      if state.menu_open {
-        let dismiss : Dismiss = {
-          key: input.id.subscription_key(),
-          emit: emit.map((_ : Unit) => CloseMenu),
-        }
-        dismiss.subscription()
-      } else {
-        @sub.none
-      }
-    },
   )
   let conversation_inputs = input.map(input => {
     @vector.from_array(input.conversations)
@@ -279,9 +221,6 @@ pub fn component(
     }
     if input.activation is Some(_) {
       class += " active"
-    }
-    if state.menu_open {
-      class += " menu-open"
     }
     let row_children : Array[@html.Html] = [
       @html.button(
@@ -308,19 +247,12 @@ pub fn component(
     if input.managed {
       row_children.push(
         @html.button(
-          class=if state.menu_open {
-            "row-archive workspace-menu-button open"
-          } else {
-            "row-archive workspace-menu-button"
-          },
+          class="row-archive workspace-menu-button",
           type_="button",
           title="More actions",
-          attrs=@html.Attrs::build()
-            .data_set("sidebar-project-menu", input.id.subscription_key())
-            .on_click(event => {
-              event.stop_propagation()
-              emit(ToggleMenu)
-            }),
+          attrs=@action_menu.button_attrs(input.id.key()).aria_label(
+            "Workspace actions",
+          ),
           @icons.icon(@icons.icon_more),
         ),
       )
@@ -339,31 +271,16 @@ pub fn component(
         ),
       )
     }
-    if input.managed && state.menu_open {
-      row_children.push(
-        @html.div(class="workspace-menu", [
-          @html.button(
-            class="workspace-menu-item",
-            type_="button",
-            title="Defaults for new chats in this workspace",
-            on_click=(actions.open_settings)(input.id),
-            [
-              @icons.icon(@icons.icon_settings_gear),
-              @html.span("Workspace settings"),
-            ],
-          ),
-          @html.button(
-            class="workspace-menu-item",
-            type_="button",
-            title="Detach this project — its files and sessions stay",
-            on_click=(actions.detach)(input.id),
-            [@icons.icon(@icons.icon_close), @html.span("Detach project")],
-          ),
-        ]),
-      )
+    let row_attrs = if input.managed {
+      @action_menu.context_attrs(input.id.key())
+    } else {
+      @html.Attrs::build()
     }
     let rows : Array[(String, @html.Html)] = [
-      (input.id.key(), @html.div(class~, title=input.title, row_children)),
+      (
+        input.id.key(),
+        @html.div(class~, title=input.title, attrs=row_attrs, row_children),
+      ),
     ]
     if collapsed {
       return rows

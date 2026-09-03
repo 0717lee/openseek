@@ -97,6 +97,8 @@ pub let codex_thread_list : Command[@protocol.CodexThreadListPayload, @protocol.
 
 pub let codex_thread_read : Command[@protocol.CodexThreadReadPayload, @protocol.CodexCommandReply[@protocol.CodexThreadReply]]
 
+pub let codex_thread_rename : Command[@protocol.CodexThreadRenamePayload, @protocol.CodexCommandReply[@protocol.EmptyReply]]
+
 pub let codex_thread_resume : Command[@protocol.CodexThreadResumePayload, @protocol.CodexCommandReply[@protocol.CodexThreadReply]]
 
 pub let codex_thread_start : Command[@protocol.CodexThreadStartPayload, @protocol.CodexCommandReply[@protocol.CodexThreadReply]]
@@ -178,6 +180,8 @@ pub let session_list_archived : Command[@protocol.EmptyPayload, @protocol.Sessio
 pub let session_load : Command[@protocol.LoadSessionPayload, @protocol.LoadSessionReply]
 
 pub let session_load_archived : Command[@protocol.LoadSessionPayload, @protocol.LoadSessionReply]
+
+pub let session_rename : Command[@protocol.SessionRenamePayload, @protocol.EmptyReply]
 
 pub let session_unarchive : Command[@protocol.SessionPayload, @protocol.SessionsReply]
 

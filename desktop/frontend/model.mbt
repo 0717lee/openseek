@@ -1316,6 +1316,54 @@ priv enum SelectMenu {
 } derive(Eq)
 
 ///|
+/// The exact OpenSeek row the user selected. This is application navigation
+/// state, independent of the Sidebar's rendering identity.
+priv struct ConversationSelection {
+  channel : @interop.ChannelId
+  session : String
+  workspace : @common.Uri
+  record : ConversationRecord
+} derive(Eq)
+
+///|
+fn ConversationSelection::matches_id(
+  self : ConversationSelection,
+  id : @conversation.Id,
+) -> Bool {
+  let record_matches = match (self.record, id.source()) {
+    (LiveRecord, @conversation.OpenSeekLive)
+    | (ArchivedRecord, @conversation.OpenSeekArchived) => true
+    _ => false
+  }
+  record_matches &&
+  self.channel.uri_authority() == id.channel() &&
+  self.session == id.conversation() &&
+  id.root() == Some(self.workspace.path)
+}
+
+///|
+fn ConversationSelection::matches_record(
+  self : ConversationSelection,
+  channel : @interop.ChannelId,
+  session : String,
+  workspace : @common.Uri,
+  record : ConversationRecord,
+) -> Bool {
+  self.channel == channel &&
+  self.session == session &&
+  self.workspace == workspace &&
+  self.record == record
+}
+
+///|
+/// A blocking first-load failure belongs to the row the user selected, not
+/// to the last conversation whose transcript happened to load successfully.
+priv struct ConversationLoadFailure {
+  target : ConversationSelection
+  message : String
+} derive(Eq)
+
+///|
 priv struct Model {
   // Connected device channels in stable order: the desktop window's one
   // Local host, or a browser console's roster devices — empty there until
@@ -1444,6 +1492,12 @@ priv struct Model {
   // Permanent archived-chat deletion has its own explicit confirmation. It
   // never shares the worktree-discard dialog because the data at risk differs.
   archived_delete_confirm : ArchivedDeleteConfirm?
+  // Controlled sidebar editor for one live conversation title.
+  conversation_rename : ConversationRename?
+  // Immediate sidebar intent. The loaded `active_session` remains separate so
+  // an older async snapshot cannot steal highlight or expose stale content.
+  selected_conversation : ConversationSelection?
+  conversation_load_failure : ConversationLoadFailure?
   // The conversation on screen; always present in `conversations` once the
   // startup session rotation lands.
   active_session : String
@@ -1838,6 +1892,7 @@ priv enum Msg {
   // Open a conversation on one device's explicit channel, selecting that
   // channel first when it differs from the current one.
   OpenSession(@interop.ChannelId, String)
+  RetrySelectedConversation
   // Open a conversation on the channel already focused. A transcript link has
   // only a session id to go on — the child session a sub-run tool card names
   // belongs to the same device as the transcript that names it — and the
@@ -1928,6 +1983,12 @@ priv enum Msg {
   DeleteArchivedSession(@interop.ChannelId, ArchiveRecordKey)
   ConfirmDeleteArchivedSession
   CancelDeleteArchivedSession
+  ConversationRenameRequested(id~ : @conversation.Id, label~ : String)
+  ConversationRenameChanged(id~ : @conversation.Id, value~ : String)
+  ConversationRenameSubmitted(@conversation.Id)
+  ConversationRenameCancelled(@conversation.Id)
+  ConversationRenameSucceeded(@conversation.Id)
+  ConversationRenameFailed(id~ : @conversation.Id, message~ : String)
   // The host's dark-mode preference changed. It updates the palette only while
   // no explicit Light/Dark choice has been saved.
   ColorSchemeChanged(Bool)
@@ -2109,8 +2170,8 @@ priv enum DeviceMsg {
   )
   SessionsFailed(String)
   // The host's identity-bearing `session.changed` broadcast. Archive changes
-  // invalidate that exact live target immediately; both sidebar lists are
-  // then re-read for their durable contents.
+  // invalidate that exact live target immediately; rename and every placement
+  // change re-read both sidebar lists for their durable contents.
   SessionsChanged(
     change~ : String,
     key~ : ArchiveRecordKey,
@@ -2561,6 +2622,9 @@ fn initial_model() -> Model {
     pending_project_adoption: None,
     archive_confirm: None,
     archived_delete_confirm: None,
+    conversation_rename: None,
+    selected_conversation: None,
+    conversation_load_failure: None,
     screen: Chat,
     codex: @codex.State(),
     skills: @skills.State::empty(),
@@ -3236,6 +3300,31 @@ fn Model::active_conversation(self : Model) -> Conversation? {
 }
 
 ///|
+/// The user's current conversation intent. During navigation this is the
+/// explicitly selected row; otherwise the loaded conversation is the
+/// selection. Keeping that fallback here prevents lifecycle code from having
+/// to choose independently between `selected_conversation` and
+/// `active_session`.
+fn Model::conversation_selection(self : Model) -> ConversationSelection? {
+  match self.selected_conversation {
+    Some(selected) => Some(selected)
+    None =>
+      self
+      .active_conversation()
+      .map(active => {
+        channel: active.device,
+        session: active.session_id,
+        workspace: active.project(),
+        record: if active.is_archived_read_only() {
+          ArchivedRecord
+        } else {
+          LiveRecord
+        },
+      })
+  }
+}
+
+///|
 /// Resolve a component action against the conversation that currently owns
 /// its local entry. A command queued just before archive replacement still
 /// names the archived owner, so that one identity maps to the fresh record.
@@ -3446,6 +3535,20 @@ fn Model::activate(
     ..self,
     focused: channel,
     active_session: session_id,
+    selected_conversation: conversations
+    .iter()
+    .find_first(conv => conv.device == channel && conv.session_id == session_id)
+    .map(conv => {
+      channel,
+      session: session_id,
+      workspace: conv.project(),
+      record: if conv.is_archived_read_only() {
+        ArchivedRecord
+      } else {
+        LiveRecord
+      },
+    }),
+    conversation_load_failure: None,
     conversations,
   }
   // `activate` is the explicit navigation path into this transcript. A

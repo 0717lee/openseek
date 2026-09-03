@@ -162,6 +162,50 @@ html.is-resizing .sidebar-resize-handle {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.conversation-rename-editor {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.conversation-rename-editor > .conversation-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font: inherit;
+}
+.conversation-rename-action {
+  flex: 0 0 auto;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-accent-strong);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+.conversation-rename-action:hover:not(:disabled) {
+  background: var(--color-accent-soft);
+}
+.conversation-rename-action:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
+  opacity: 0.6;
+}
+.conversation-rename-error {
+  flex: 0 0 100%;
+  color: var(--color-danger);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-tight);
+}
 
 .conversation-row:hover {
   background: var(--color-bg-subtle);
@@ -170,6 +214,47 @@ html.is-resizing .sidebar-resize-handle {
 .conversation-row.active {
   background: var(--color-accent-soft);
   color: var(--color-accent-strong);
+}
+
+.conversation-row.load-failed {
+  color: var(--color-danger);
+}
+
+.conversation-load-spinner,
+.conversation-load-state-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent-strong);
+  border-radius: 50%;
+  animation: conversation-load-spin 0.8s linear infinite;
+}
+.conversation-load-failed {
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+@keyframes conversation-load-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.conversation-load-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 100%;
+  color: var(--color-text-secondary);
+}
+.conversation-load-state.failed {
+  flex-direction: column;
+  text-align: center;
+}
+.conversation-load-state-message {
+  max-width: 520px;
+  color: var(--color-text-muted);
 }
 
 .conversation-row.error {
@@ -203,6 +288,14 @@ html.is-resizing .sidebar-resize-handle {
   background: var(--color-hover-subtle);
   color: var(--color-text-primary);
 }
+.row-archive.disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.row-archive.disabled:hover {
+  background: transparent;
+  color: var(--color-text-muted);
+}
 .row-archive.row-delete:hover {
   background: var(--color-danger-soft);
   color: var(--color-danger);
@@ -228,11 +321,17 @@ html.is-resizing .sidebar-resize-handle {
   gap: 6px;
 }
 /* Both groups stay in layout (visibility, not display) so the cell keeps
-   one width across the swap. Only a slot that actually has actions hides
-   its status — a running row has no archive button, and blanking its dot
-   under the cursor would leave the slot empty. */
+   one width across the swap. An open menu keeps its trigger visible while
+   the pointer moves into the floating surface. */
 .conversation-row:hover .row-trailing:has(.row-actions) .row-status {
   visibility: hidden;
+}
+.conversation-row.loading .row-trailing {
+  display: flex;
+  gap: 6px;
+}
+.conversation-row.loading:hover .row-trailing:has(.row-actions) .row-status {
+  visibility: visible;
 }
 
 /* The chat list's two section headings ("Workspaces", "Chats"): the
@@ -324,25 +423,21 @@ html.is-resizing .sidebar-resize-handle {
   visibility: visible;
 }
 
-/* The workspace row's "…" dropdown (settings, detach), anchored to the row.
-   While it is open the row keeps its hover-revealed controls visible, so
-   moving the pointer into the floating menu doesn't blank the button that
-   opened it. */
-.workspace-row {
-  position: relative;
-}
-.workspace-row.menu-open .row-archive,
-.workspace-menu-button.open {
+/* An open workspace menu keeps the hover-revealed trigger visible while the
+   pointer moves into the floating surface. */
+.workspace-menu-button[aria-expanded="true"] {
   visibility: visible;
 }
-.workspace-menu-button.open {
+.workspace-menu-button[aria-expanded="true"] {
   background: var(--color-hover-subtle);
   color: var(--color-text-primary);
 }
-.workspace-menu {
-  position: absolute;
-  top: calc(100% + 2px);
-  right: 4px;
+/* Shared WebView action menu for workspace and conversation rows. Its module
+   measures the chosen button or context-menu point after render, flips when
+   needed, and writes the final fixed position inside the visual viewport. */
+.action-menu {
+  --icon-size: var(--icon-md);
+  position: fixed;
   min-width: 180px;
   padding: 4px;
   border: 1px solid var(--color-border);
@@ -351,8 +446,10 @@ html.is-resizing .sidebar-resize-handle {
   box-shadow: var(--shadow-overlay);
   z-index: var(--z-menu);
 }
-.workspace-menu-item {
-  --icon-size: var(--icon-md);
+.action-menu[data-positioned="false"] {
+  visibility: hidden;
+}
+.action-menu-item {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -367,15 +464,41 @@ html.is-resizing .sidebar-resize-handle {
   text-align: left;
   cursor: pointer;
 }
-.workspace-menu-item:hover {
+.action-menu-item:hover,
+.action-menu-item:focus-visible {
+  outline: none;
   background: var(--color-accent-soft);
   color: var(--color-accent-strong);
 }
-.workspace-menu-item > .icon {
+.action-menu-item:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.action-menu-item:disabled:hover {
+  background: transparent;
+  color: var(--color-text-primary);
+}
+.action-menu-item.destructive:hover,
+.action-menu-item.destructive:focus-visible {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+.action-menu-item > .icon {
   color: var(--color-text-muted);
 }
-.workspace-menu-item:hover > .icon {
+.action-menu-item:hover > .icon,
+.action-menu-item:focus-visible > .icon {
   color: inherit;
+}
+.action-menu-icon-placeholder {
+  flex: 0 0 var(--icon-size);
+  width: var(--icon-size);
+  height: var(--icon-size);
+}
+.action-menu-separator {
+  height: 1px;
+  margin: 4px;
+  background: var(--color-border);
 }
 
 /* Worktree affordances: the sidebar row's branch glyph and the composer's
