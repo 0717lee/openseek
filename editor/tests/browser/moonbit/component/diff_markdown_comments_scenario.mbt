@@ -159,7 +159,7 @@ impl @language.MarkdownCommentProvider for DiffMarkdownCommentProvider with fn p
 }
 
 ///|
-fn run_diff_markdown_comments_test() -> Unit {
+pub fn run_diff_markdown_comments_test() -> Unit {
   let document = @rdom.document()
   guard document.query_selector("#app").to_option() is Some(app) else {
     abort("missing #app mount point")

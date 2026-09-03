@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 import {
   expectMoonBitReportPassed,
   installMoonBitReporter,
@@ -9,7 +9,7 @@ test('seeds layout before attach and stabilizes at explicit initialization', asy
 }, testInfo) => {
   const reporter = await installMoonBitReporter(page);
   try {
-    await page.goto('/browser-tests/component.html?initialSize=1');
+    await gotoBrowserScenario(page, 'initial-size');
     const report = await reporter.waitForReport(testInfo, {
       suite: 'initial_size',
     });

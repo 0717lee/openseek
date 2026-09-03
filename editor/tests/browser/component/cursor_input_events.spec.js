@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 
 const editorSelector = '.cursor-input-host > .monaco-editor.readonly-editor';
 const cursorFixtureText = [
@@ -26,7 +26,7 @@ async function settle(page) {
 }
 
 async function mountCursorFixture(page) {
-  await page.goto('/browser-tests/component.html?cursorInput=1');
+  await gotoBrowserScenario(page, 'cursor-input-events');
   await page.waitForFunction(() => Boolean(globalThis.__cursorInputControls));
   await expect(page.locator(editorSelector)).toContainText('alpha');
   await page.evaluate(() => globalThis.__cursorInputControls.focus());

@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 
 // Mouse-driven selection modes routed through the ported ViewController:
 // dispatchMouse maps the multi-click count to CoreNavigationCommands, so a
@@ -7,7 +7,7 @@ import { expect, test } from '../support/test.js';
 // clipboard (the model selection), independent of the rendered view lines.
 
 async function mountComponentViewer(page) {
-  await page.goto('/browser-tests/component.html');
+  await gotoBrowserScenario(page, 'viewer-api');
   await expect(page.locator('.monaco-editor.readonly-editor')).toContainText('component_answer', {
     timeout: 10_000,
   });

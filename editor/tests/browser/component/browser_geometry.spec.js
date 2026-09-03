@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 import {
   expectMoonBitReportPassed,
   installMoonBitReporter,
@@ -14,7 +14,7 @@ const hostSelector = (font) =>
 
 async function mountGeometry(page, testInfo) {
   const reporter = await installMoonBitReporter(page);
-  await page.goto('/browser-tests/component.html?browserGeometry=1');
+  await gotoBrowserScenario(page, 'browser-geometry');
   await page.waitForFunction(() => Boolean(globalThis.__browserGeometryControls));
   const report = await reporter.waitForReport(testInfo, {
     suite: 'browser_geometry',

@@ -70,7 +70,7 @@ fn seed_swap_diagnostic(
 }
 
 ///|
-fn run_model_swap_test() -> Unit {
+pub fn run_model_swap_test() -> Unit {
   let ctx = @support.BrowserTestContext("model_swap")
   let document = @rdom.document()
   guard document.query_selector("#app").to_option() is Some(app) else {

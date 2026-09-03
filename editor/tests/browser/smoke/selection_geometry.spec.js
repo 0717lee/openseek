@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 
 // Selection geometry parity: pointer hits resolve through the browser caret
 // APIs and the selection highlight is painted from DOM-measured client rects
@@ -8,7 +8,7 @@ import { expect, test } from '../support/test.js';
 // end-of-line fill when the selection continues past a line's text.
 
 async function mountComponentViewer(page) {
-  await page.goto('/browser-tests/component.html');
+  await gotoBrowserScenario(page, 'viewer-api');
   await expect(page.locator('.monaco-editor.readonly-editor')).toContainText('component_answer', {
     timeout: 10_000,
   });

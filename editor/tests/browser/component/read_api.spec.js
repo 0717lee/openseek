@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 import {
   expectMoonBitReportPassed,
   installMoonBitReporter,
@@ -6,7 +6,7 @@ import {
 
 test('runs MoonBit DOM-measured read-API checks in the browser', async ({ page }, testInfo) => {
   const reporter = await installMoonBitReporter(page);
-  await page.goto('/browser-tests/read_api.html');
+  await gotoBrowserScenario(page, 'read-api');
   // The no-wrap fixture viewer renders its lines before the measurements run.
   await expect(page.locator('.monaco-editor.readonly-editor .view-line').first()).toBeVisible({
     timeout: 10_000,

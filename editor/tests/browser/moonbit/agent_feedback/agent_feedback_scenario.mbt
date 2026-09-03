@@ -9,7 +9,7 @@
 // attributes so the spec can observe host-persistence facts.
 
 ///|
-fn run_agent_feedback_test() -> Unit {
+pub fn run_agent_feedback_test() -> Unit {
   let ctx = @support.BrowserTestContext("agent_feedback")
   let done = Ref(false)
   let uri = try! @base_common.Uri::from(

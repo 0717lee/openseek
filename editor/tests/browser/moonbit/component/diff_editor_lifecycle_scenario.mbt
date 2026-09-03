@@ -89,7 +89,7 @@ impl @diff.DocumentDiffProvider for InvalidDiffLifecycleProvider with fn on_did_
 }
 
 ///|
-fn run_diff_editor_lifecycle_test() -> Unit {
+pub fn run_diff_editor_lifecycle_test() -> Unit {
   let document = @rdom.document()
   guard document.query_selector("#app").to_option() is Some(app) else {
     abort("missing #app mount point")

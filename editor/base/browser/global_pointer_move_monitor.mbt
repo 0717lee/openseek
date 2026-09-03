@@ -101,7 +101,7 @@ pub fn GlobalPointerMoveMonitor::start_monitoring(
     owning_window_event_target(initial_element)
   }
   let pointer_move = (event : @rdom.Event) => {
-    if event.to_mouse_event() is Some(e) {
+    if cross_realm_mouse_event(event).to_option() is Some(e) {
       if e.get_buttons() != initial_buttons {
         // Buttons state has changed in the meantime
         self.stop_monitoring(true)
@@ -127,6 +127,16 @@ pub fn GlobalPointerMoveMonitor::start_monitoring(
     }),
   )
 }
+
+///|
+/// Rabbita's general MouseEvent cast uses the current realm's `instanceof`.
+/// A PointerEvent delivered by an iframe's owning window is therefore rejected
+/// even though it exposes the MouseEvent contract used by this monitor. Keep
+/// this structural conversion local to the known `pointermove` listener.
+extern "js" fn cross_realm_mouse_event(
+  event : @rdom.Event,
+) -> @js.Nullable[@rdom.MouseEvent] =
+  #| (event) => typeof event?.buttons === "number" ? event : null
 
 ///|
 /// Narrow gap-fill for `Element.setPointerCapture`. `false` is the source's

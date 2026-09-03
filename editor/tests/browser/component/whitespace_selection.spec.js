@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 import {
   expectMoonBitReportPassed,
   installMoonBitReporter,
@@ -17,7 +17,7 @@ async function dragAcrossLine(page, lineLocator) {
 
 test('paints whitespace dots only under a selection and re-renders on change', async ({ page }, testInfo) => {
   const reporter = await installMoonBitReporter(page);
-  await page.goto('/browser-tests/whitespace_selection.html');
+  await gotoBrowserScenario(page, 'whitespace-selection');
   await expect(page.locator('.monaco-editor.readonly-editor .view-line').first()).toBeVisible({
     timeout: 10_000,
   });

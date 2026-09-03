@@ -3,6 +3,12 @@ import { createTestLogger, installPageLogging, withLoggedOperation } from './log
 
 export { expect };
 
+export async function gotoBrowserScenario(page, scenario) {
+  return page.goto(
+    `/browser-tests/runner.html?scenario=${encodeURIComponent(scenario)}`,
+  );
+}
+
 export const test = base.extend({
   page: async ({ page }, use, testInfo) => {
     const logger = createTestLogger(testInfo);

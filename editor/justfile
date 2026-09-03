@@ -17,7 +17,7 @@ dist-front-end:
     moon run --target native scripts/build-web.mbtx
     moon run --target native scripts/stage_mermaid
 
-# Stage the browser-correctness scenario bundles into web/dist/browser-tests
+# Stage the single browser-correctness runner into web/dist/browser-tests
 build-browser-tests: dist-front-end
     moon run --target native scripts/build-browser-tests.mbtx
 

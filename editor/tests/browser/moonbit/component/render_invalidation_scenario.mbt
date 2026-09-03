@@ -73,7 +73,7 @@ fn render_invalidation_position_json(viewer : @viewer.Viewer) -> String {
 }
 
 ///|
-fn run_render_invalidation_test() -> Unit {
+pub fn run_render_invalidation_test() -> Unit {
   let ctx = @support.BrowserTestContext("render_invalidation")
   let document = @rdom.document()
   guard document.query_selector("#app").to_option() is Some(app) else {

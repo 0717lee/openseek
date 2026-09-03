@@ -1,4 +1,4 @@
-import { expect, test } from '../support/test.js';
+import { expect, gotoBrowserScenario, test } from '../support/test.js';
 import {
   expectMoonBitReportPassed,
   installMoonBitReporter,
@@ -16,7 +16,7 @@ import {
 test('rebuilds the view per model and carries focus across set_model', async ({ page }, testInfo) => {
   const reporter = await installMoonBitReporter(page);
   try {
-    await page.goto('/browser-tests/model_swap.html');
+    await gotoBrowserScenario(page, 'model-swap');
 
     const hoverMarkerStart = async () => {
       const line = page.locator('.viewer-host .view-line[data-line="1"]');

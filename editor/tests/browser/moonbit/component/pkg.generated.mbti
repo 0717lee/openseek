@@ -2,9 +2,29 @@
 package "moonbitlang/editor/tests/browser/moonbit/component"
 
 // Values
+pub fn run_browser_geometry_test() -> Unit
+
+pub fn run_cursor_input_events_test() -> Unit
+
+pub fn run_diff_editor_lifecycle_test() -> Unit
+
+pub fn run_diff_markdown_comments_test() -> Unit
+
+pub fn run_initial_size_test() -> Unit
+
+pub fn run_markdown_comments_test() -> Unit
+
+pub fn run_markdown_document_test() -> Unit
+
+pub fn run_markdown_folding_test() -> Unit
+
+pub fn run_render_invalidation_test() -> Unit
+
+pub fn run_view_zones_test() -> Unit
+
+pub fn run_viewer_api_test() -> Unit
 
 // Errors
-type ViewZonesFixtureError
 
 // Types and methods
 

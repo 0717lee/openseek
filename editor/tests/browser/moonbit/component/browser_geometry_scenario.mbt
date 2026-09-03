@@ -305,7 +305,7 @@ fn browser_geometry_fixture_for(
 }
 
 ///|
-fn run_browser_geometry_test() -> Unit {
+pub fn run_browser_geometry_test() -> Unit {
   let ctx = @support.BrowserTestContext("browser_geometry")
   let document = @rdom.document()
   guard document.query_selector("#app").to_option() is Some(app) else {

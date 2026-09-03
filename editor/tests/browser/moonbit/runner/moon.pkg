@@ -1,0 +1,19 @@
+import {
+  "moonbitlang/editor/tests/browser/moonbit/agent_feedback",
+  "moonbitlang/editor/tests/browser/moonbit/base_browser" @base_browser_scenario,
+  "moonbitlang/editor/tests/browser/moonbit/component",
+  "moonbitlang/editor/tests/browser/moonbit/definition",
+  "moonbitlang/editor/tests/browser/moonbit/folding",
+  "moonbitlang/editor/tests/browser/moonbit/folding_nested",
+  "moonbitlang/editor/tests/browser/moonbit/model_swap",
+  "moonbitlang/editor/tests/browser/moonbit/peek_references",
+  "moonbitlang/editor/tests/browser/moonbit/quick_diff",
+  "moonbitlang/editor/tests/browser/moonbit/read_api",
+  "moonbitlang/editor/tests/browser/moonbit/support",
+  "moonbitlang/editor/tests/browser/moonbit/whitespace_selection",
+  "moonbit-community/rabbita/js",
+}
+
+supported_targets = "js"
+
+pkgtype(kind: "executable")
