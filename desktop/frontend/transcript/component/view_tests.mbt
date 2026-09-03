@@ -435,7 +435,8 @@ test "live reasoning is plain text and keeps the durable activity key" {
     input: { ..live_input, reasoning_complete: true, },
   }
   assert_true(
-    complete_renderer.stream_children().get("activity\u{0}after\u{0}s1\u{0}o0") is Some(_),
+    complete_renderer.stream_children().get("activity\u{0}after\u{0}s1\u{0}o0")
+    is Some(_),
   )
 
   let settled = {
