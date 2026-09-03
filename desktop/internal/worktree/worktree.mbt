@@ -683,8 +683,8 @@ pub async fn list_codex_worktree_bindings() -> Array[CodexWorktreeBinding] {
 
 ///|
 /// The smallest `wt-N` nobody holds: free in the registry, on disk, and as
-/// a branch. Branches survive removal, so the counter naturally skips past
-/// history instead of resurrecting an old branch.
+/// a branch. Branches survive removal, so the counter moves past history
+/// instead of pairing a reused name with a lookalike of an old branch.
 async fn fresh_worktree_name(
   dir : @pathx.Absolute,
   entries : Array[WorktreeEntry],
@@ -701,13 +701,17 @@ async fn fresh_worktree_name(
     if occupied {
       continue
     }
+    // Salted branches survive removal as `openseek/<name>-<salt>`, and
+    // branches minted before salting as the bare `openseek/<name>`, so a
+    // name's history is the exact ref plus the prefix match.
     if @gitx.probe(dir, [
-        "show-ref",
-        "--verify",
-        "--quiet",
+        "for-each-ref",
+        "--format=%(refname)",
         "refs/heads/\{WorktreeBranchPrefix}\{name}",
+        "refs/heads/\{WorktreeBranchPrefix}\{name}-*",
       ])
-      is Some(_) {
+      is Some(listing) &&
+      !listing.is_empty() {
       continue
     }
     return name
@@ -716,13 +720,13 @@ async fn fresh_worktree_name(
 }
 
 ///|
-/// Create a worktree `<workspace>/.worktrees/<name>` on a fresh branch
-/// `openseek/<name>` at the workspace's current HEAD, bound from birth to
-/// `owner` — creation IS the binding, so the start path never mutates the
-/// registry and a refused start cannot re-route a conversation. The owner id
-/// is the idempotency key: an owner that already holds a worktree gets that
-/// binding back instead of a second checkout, which is what
-/// makes a lost create reply safe to retry. The name is host-generated
+/// Create a worktree `<workspace>/.worktrees/<name>` on a fresh salted
+/// branch `openseek/<name>-<salt>` at the workspace's current HEAD, bound
+/// from birth to `owner` — creation IS the binding, so the start path never
+/// mutates the registry and a refused start cannot re-route a conversation.
+/// The owner id is the idempotency key: an owner that already holds a
+/// worktree gets that binding back instead of a second checkout, which is
+/// what makes a lost create reply safe to retry. The name is host-generated
 /// (`wt-N`); the wire op takes none — `name?` exists for tests, which need
 /// deterministic fixtures and keep the holder-naming refusals covered.
 /// The whole op runs under `workspace_lifecycle_lock` (like removal), so
@@ -854,9 +858,9 @@ pub async fn create(
     Some(name) => name
     None => fresh_worktree_name(dir, entries)
   }
-  // Refusals name the holder: the registry entry, the directory (a subtask
-  // slice can own `.worktrees/<name>` without any registry entry), or the
-  // branch.
+  // Refusals name the holder: the registry entry or the directory (a subtask
+  // slice can own `.worktrees/<name>` without any registry entry). The branch
+  // is freshly salted, so nothing can hold it ahead of us.
   if entries.iter().any(entry => entry.name == name) {
     raise WorktreeError("worktree \{name} already exists in this workspace")
   }
@@ -870,18 +874,15 @@ pub async fn create(
       "\{target} already exists on disk; another tool may own it",
     )
   }
-  let branch = WorktreeBranchPrefix + name
-  if @gitx.probe(dir, [
-      "show-ref",
-      "--verify",
-      "--quiet",
-      "refs/heads/\{branch}",
-    ])
-    is Some(_) {
-    raise WorktreeError(
-      "branch \{branch} already exists; delete it or pick another name",
-    )
+  // Salted so that two machines' independent `wt-N` counters can never mint
+  // the same branch name and collide on a shared remote; 32 bits is plenty
+  // for that, and anything longer only clutters the branch chip and
+  // pull-request heads. No OS entropy is a hard failure, never weak
+  // randomness.
+  guard @entropy.random_hex(4) is Some(salt) else {
+    raise WorktreeError("no OS entropy available to mint a worktree branch")
   }
+  let branch = "\{WorktreeBranchPrefix}\{name}-\{salt}"
   @workspaces.exclude_from_git(dir, WorktreesDirName)
   let base = @gitx.run(dir, ["rev-parse", "HEAD"])
   // The branch comes first, on its own: our locks are in-process only, so
@@ -1393,7 +1394,9 @@ async test "worktree create provisions checkout, branch, registry, exclusion" {
   assert_eq(reply.name, "fix-auth")
   guard reply.worktrees is [info] else { fail("expected one worktree") }
   assert_eq(info.name, "fix-auth")
-  assert_eq(info.branch, "openseek/fix-auth")
+  // The minted branch is `openseek/<name>-<8 hex chars of salt>`.
+  assert_true(info.branch.has_prefix("openseek/fix-auth-"))
+  assert_eq(info.branch.length(), "openseek/fix-auth-".length() + 8)
   assert_eq(info.base, @gitx.run(repo, ["rev-parse", "HEAD"]))
   // Creation IS the binding: the entry carries its conversation from birth.
   assert_eq(info.session, Some("s-fix-auth"))
@@ -1404,7 +1407,10 @@ async test "worktree create provisions checkout, branch, registry, exclusion" {
   assert_true(@fsx.is_dir(repo.join(".worktrees/fix-auth").to_path()))
   assert_true(
     @gitx.probe(repo, [
-      "show-ref", "--verify", "--quiet", "refs/heads/openseek/fix-auth",
+      "show-ref",
+      "--verify",
+      "--quiet",
+      "refs/heads/\{info.branch}",
     ])
     is Some(_),
   )
@@ -1413,7 +1419,7 @@ async test "worktree create provisions checkout, branch, registry, exclusion" {
     @gitx.run(repo.join(".worktrees/fix-auth"), [
       "rev-parse", "--abbrev-ref", "HEAD",
     ]),
-    "openseek/fix-auth",
+    info.branch,
   )
   let exclude = @fsx.read_text(repo.join(".git/info/exclude").to_path())
   assert_true(exclude.contains(".worktrees/"))
@@ -1507,6 +1513,10 @@ async test "worktree names are host-generated and skip surviving branches" {
   }
   assert_eq(a.name, "wt-2")
   assert_eq(b.name, "wt-3")
+  // A bare `openseek/wt-4` left behind by a build that minted unsalted
+  // branches is history too: the counter moves past it instead of pairing
+  // the directory with a lookalike salted branch.
+  ignore(@gitx.run(repo, ["branch", "openseek/wt-4"]))
   // Codex uses the same registry, name allocator, and idempotency contract,
   // but its owner remains in a distinct field from OpenSeek sessions.
   let codex = create(host, repo.to_string(), WorktreeOwner::codex("thread-1"), fn(
@@ -1514,15 +1524,15 @@ async test "worktree names are host-generated and skip surviving branches" {
   ) {
 
   })
-  assert_eq(codex.name, "wt-4")
+  assert_eq(codex.name, "wt-5")
   let codex_replay = create(
     host,
     repo.to_string(),
     WorktreeOwner::codex("thread-1"),
     fn(_) {  },
   )
-  assert_eq(codex_replay.name, "wt-4")
-  guard codex_replay.worktrees.iter().find_first(info => info.name == "wt-4")
+  assert_eq(codex_replay.name, "wt-5")
+  guard codex_replay.worktrees.iter().find_first(info => info.name == "wt-5")
     is Some(codex_info) else {
     fail("expected Codex-owned worktree row")
   }
@@ -1649,12 +1659,6 @@ async test "worktree create names the holder in every refusal" {
       "already exists on disk",
     ),
   )
-  ignore(@gitx.run(repo, ["branch", "openseek/task"]))
-  assert_true(
-    create_refusal(host, repo.to_string(), "s-4", "task").contains(
-      "branch openseek/task already exists",
-    ),
-  )
   // A workspace that is not a git repository cannot host worktrees; a linked
   // worktree registered before the attach guard existed is refused too.
   let plain = root.join("plain")
@@ -1714,14 +1718,12 @@ async test "worktree remove enforces the dirty check and keeps the branch" {
       "no worktree named",
     ),
   )
-  ignore(
-    create(
-      host,
-      repo.to_string(),
-      WorktreeOwner::openseek("s-w1"),
-      fn(_) {  },
-      name="w1",
-    ),
+  let w1 = create(
+    host,
+    repo.to_string(),
+    WorktreeOwner::openseek("s-w1"),
+    fn(_) {  },
+    name="w1",
   )
   @fs.write_file(
     repo.join(".worktrees/w1/junk.txt").to_string(),
@@ -1741,27 +1743,33 @@ async test "worktree remove enforces the dirty check and keeps the branch" {
   assert_eq(committed.val, 0)
   assert_eq(forced.worktrees.length(), 0)
   assert_false(@fsx.exists(repo.join(".worktrees/w1").to_path()))
+  guard w1.worktrees is [w1_info] else { fail("expected one worktree") }
   // Committed work is never lost: the branch survives every removal.
   assert_true(
     @gitx.probe(repo, [
-      "show-ref", "--verify", "--quiet", "refs/heads/openseek/w1",
+      "show-ref",
+      "--verify",
+      "--quiet",
+      "refs/heads/\{w1_info.branch}",
     ])
     is Some(_),
   )
-  ignore(
-    create(
-      host,
-      repo.to_string(),
-      WorktreeOwner::openseek("s-w2"),
-      fn(_) {  },
-      name="w2",
-    ),
+  let w2 = create(
+    host,
+    repo.to_string(),
+    WorktreeOwner::openseek("s-w2"),
+    fn(_) {  },
+    name="w2",
   )
   ignore(remove(host, repo.to_string(), "w2", false, fn(_) {  }))
   assert_eq(list(repo.to_string()).worktrees.length(), 0)
+  guard w2.worktrees is [w2_info] else { fail("expected one worktree") }
   assert_true(
     @gitx.probe(repo, [
-      "show-ref", "--verify", "--quiet", "refs/heads/openseek/w2",
+      "show-ref",
+      "--verify",
+      "--quiet",
+      "refs/heads/\{w2_info.branch}",
     ])
     is Some(_),
   )
